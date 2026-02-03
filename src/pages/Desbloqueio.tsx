@@ -1,0 +1,180 @@
+import React, { useState } from 'react';
+import { Unlock, Loader2, CheckCircle, XCircle, AlertTriangle, Wifi } from 'lucide-react';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { AppLayout } from '@/components/AppLayout';
+import { useAuth } from '@/contexts/AuthContext';
+import { useToast } from '@/hooks/use-toast';
+import { supabase } from '@/integrations/supabase/client';
+
+type DesbloqueioStatus = 'idle' | 'loading' | 'success' | 'error';
+
+const Desbloqueio: React.FC = () => {
+  const { cliente } = useAuth();
+  const { toast } = useToast();
+  const [status, setStatus] = useState<DesbloqueioStatus>('idle');
+  const [message, setMessage] = useState('');
+
+  if (!cliente) return null;
+
+  const isBloqueado = cliente.bloqueado;
+
+  const handleDesbloqueio = async () => {
+    setStatus('loading');
+    setMessage('');
+
+    try {
+      const { data, error } = await supabase.functions.invoke('mikweb-desbloqueio', {
+        body: { cliente_id: cliente.id, conexao_id: cliente.conexao_id },
+      });
+
+      if (error) throw error;
+
+      if (data.success) {
+        setStatus('success');
+        setMessage(data.message || 'Desbloqueio realizado com sucesso!');
+        toast({
+          title: 'Sucesso!',
+          description: 'Sua conexão foi desbloqueada.',
+        });
+      } else {
+        setStatus('error');
+        setMessage(data.error || 'Não foi possível realizar o desbloqueio.');
+        toast({
+          title: 'Erro',
+          description: data.error || 'Falha ao desbloquear.',
+          variant: 'destructive',
+        });
+      }
+    } catch (err) {
+      setStatus('error');
+      setMessage('Erro ao conectar com o servidor.');
+      toast({
+        title: 'Erro',
+        description: 'Erro de conexão. Tente novamente.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const resetStatus = () => {
+    setStatus('idle');
+    setMessage('');
+  };
+
+  return (
+    <AppLayout title="Autodesbloqueio" showBack>
+      <div className="p-4 space-y-4">
+        {/* Status atual */}
+        <Card className={isBloqueado ? 'border-destructive/50 bg-destructive/5' : 'border-success/50 bg-success/5'}>
+          <CardContent className="p-4 flex items-center gap-4">
+            <div className={`h-12 w-12 rounded-full flex items-center justify-center ${
+              isBloqueado ? 'bg-destructive/10' : 'bg-success/10'
+            }`}>
+              <Wifi className={`h-6 w-6 ${isBloqueado ? 'text-destructive' : 'text-success'}`} />
+            </div>
+            <div>
+              <p className="text-sm text-muted-foreground">Status atual</p>
+              <p className={`font-semibold ${isBloqueado ? 'text-destructive' : 'text-success'}`}>
+                {isBloqueado ? 'Conexão bloqueada' : 'Conexão ativa'}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Card principal de desbloqueio */}
+        <Card>
+          <CardHeader className="text-center">
+            <CardTitle className="flex items-center justify-center gap-2">
+              <Unlock className="h-5 w-5" />
+              Autodesbloqueio
+            </CardTitle>
+            <CardDescription>
+              {isBloqueado 
+                ? 'Sua conexão está bloqueada. Clique abaixo para solicitar o desbloqueio temporário.'
+                : 'Sua conexão está ativa. Não é necessário realizar desbloqueio.'}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {status === 'idle' && (
+              <>
+                {isBloqueado ? (
+                  <Button 
+                    onClick={handleDesbloqueio} 
+                    className="w-full h-12 text-base"
+                  >
+                    <Unlock className="h-5 w-5 mr-2" />
+                    Solicitar Desbloqueio
+                  </Button>
+                ) : (
+                  <div className="flex items-center justify-center gap-2 py-4 text-success">
+                    <CheckCircle className="h-5 w-5" />
+                    <span className="font-medium">Conexão funcionando normalmente</span>
+                  </div>
+                )}
+              </>
+            )}
+
+            {status === 'loading' && (
+              <div className="flex flex-col items-center gap-4 py-6">
+                <Loader2 className="h-10 w-10 animate-spin text-primary" />
+                <p className="text-muted-foreground">Processando desbloqueio...</p>
+              </div>
+            )}
+
+            {status === 'success' && (
+              <div className="flex flex-col items-center gap-4 py-6 text-center">
+                <div className="h-16 w-16 rounded-full bg-success/10 flex items-center justify-center">
+                  <CheckCircle className="h-8 w-8 text-success" />
+                </div>
+                <div>
+                  <p className="font-semibold text-success">Desbloqueio realizado!</p>
+                  <p className="text-sm text-muted-foreground mt-1">{message}</p>
+                </div>
+                <Button variant="outline" onClick={resetStatus}>
+                  Voltar
+                </Button>
+              </div>
+            )}
+
+            {status === 'error' && (
+              <div className="flex flex-col items-center gap-4 py-6 text-center">
+                <div className="h-16 w-16 rounded-full bg-destructive/10 flex items-center justify-center">
+                  <XCircle className="h-8 w-8 text-destructive" />
+                </div>
+                <div>
+                  <p className="font-semibold text-destructive">Falha no desbloqueio</p>
+                  <p className="text-sm text-muted-foreground mt-1">{message}</p>
+                </div>
+                <div className="flex gap-2">
+                  <Button variant="outline" onClick={resetStatus}>
+                    Voltar
+                  </Button>
+                  <Button onClick={handleDesbloqueio}>
+                    Tentar novamente
+                  </Button>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Aviso importante */}
+        <Card className="border-warning/50 bg-warning/5">
+          <CardContent className="p-4 flex gap-3">
+            <AlertTriangle className="h-5 w-5 text-warning shrink-0 mt-0.5" />
+            <div className="text-sm">
+              <p className="font-medium text-warning-foreground">Importante</p>
+              <p className="text-muted-foreground mt-1">
+                O autodesbloqueio é temporário e será revertido caso existam pendências financeiras. 
+                Para regularização definitiva, entre em contato com o suporte.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </AppLayout>
+  );
+};
+
+export default Desbloqueio;
