@@ -31,7 +31,7 @@ serve(async (req) => {
     }
 
     // Buscar cliente na API MikWeb filtrando por CPF
-    const response = await fetch(`https://api.mikweb.com.br/v1/admin/clientes?cpf_cnpj=${cpf}`, {
+    const response = await fetch(`https://api.mikweb.com.br/v1/admin/customers?cpf_cnpj=${cpf}`, {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${apiToken}`,
@@ -49,8 +49,8 @@ serve(async (req) => {
 
     const data = await response.json();
 
-    // A API retorna um array de clientes
-    const clientes = data.clientes || data.data || data;
+    // A API retorna um objeto com customers array
+    const clientes = data.customers || data.data || [];
     
     if (!Array.isArray(clientes) || clientes.length === 0) {
       return new Response(
@@ -62,33 +62,34 @@ serve(async (req) => {
     // Pegar o primeiro cliente encontrado
     const cliente = clientes[0];
 
+    // Verificar status financeiro para determinar se está bloqueado
+    const isBloqueado = cliente.financial_status === 'B' || cliente.status === 'Bloqueado';
+
     return new Response(
       JSON.stringify({ 
         success: true, 
         cliente: {
           id: cliente.id,
-          nome: cliente.nome,
+          nome: cliente.full_name,
           cpf_cnpj: cliente.cpf_cnpj,
           email: cliente.email,
-          celular: cliente.celular,
-          telefone: cliente.telefone,
-          endereco: cliente.endereco,
-          numero: cliente.numero,
-          bairro: cliente.bairro,
-          cidade: cliente.cidade,
-          estado: cliente.estado,
-          cep: cliente.cep,
+          celular: cliente.cell_phone_number_1,
+          telefone: cliente.phone_number,
+          endereco: cliente.street,
+          numero: cliente.number,
+          bairro: cliente.neighborhood,
+          cidade: cliente.city,
+          estado: cliente.state,
+          cep: cliente.zip_code,
           status: cliente.status,
-          data_cadastro: cliente.data_cadastro,
-          data_ativacao: cliente.data_ativacao,
+          data_cadastro: cliente.customer_since,
           login: cliente.login,
-          plano: cliente.plano,
-          plano_nome: cliente.plano_nome,
-          valor_plano: cliente.valor_plano,
-          vencimento: cliente.vencimento,
-          bloqueado: cliente.bloqueado === true || cliente.bloqueado === 1 || cliente.status === 'Bloqueado',
-          conexao_id: cliente.conexao_id,
-          conexao_login: cliente.conexao_login,
+          plano: cliente.plan?.id,
+          plano_nome: cliente.plan?.name,
+          valor_plano: cliente.plan?.value,
+          vencimento: cliente.due_day,
+          bloqueado: isBloqueado,
+          servidor: cliente.server?.name,
         }
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
