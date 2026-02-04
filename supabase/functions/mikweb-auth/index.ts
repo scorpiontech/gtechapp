@@ -62,13 +62,28 @@ serve(async (req) => {
     
     if (!Array.isArray(clientes) || clientes.length === 0) {
       return new Response(
-        JSON.stringify({ success: false, error: 'CPF não encontrado' }),
+        JSON.stringify({ success: false, error: 'CPF/CNPJ não encontrado' }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 404 }
       );
     }
 
-    // Pegar o primeiro cliente encontrado
-    const cliente = clientes[0];
+    // Normalizar CPF/CNPJ para comparação (remover formatação)
+    const cpfNormalizado = cpf.replace(/\D/g, '');
+    
+    // Filtrar pelo CPF/CNPJ exato
+    const clienteEncontrado = clientes.find((c: any) => {
+      const cpfCliente = (c.cpf_cnpj || '').replace(/\D/g, '');
+      return cpfCliente === cpfNormalizado;
+    });
+
+    if (!clienteEncontrado) {
+      return new Response(
+        JSON.stringify({ success: false, error: 'CPF/CNPJ não encontrado' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 404 }
+      );
+    }
+
+    const cliente = clienteEncontrado;
 
     // Verificar status financeiro para determinar se está bloqueado
     const isBloqueado = cliente.financial_status === 'B' || cliente.status === 'Bloqueado';
