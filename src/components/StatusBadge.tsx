@@ -18,16 +18,20 @@ const statusConfig: Record<StatusType, { label: string; className: string }> = {
   aberto: { label: 'Aberto', className: 'bg-primary text-primary-foreground' },
 };
 
-export const StatusBadge: React.FC<StatusBadgeProps> = ({ status, className }) => {
-  const normalizedStatus = status.toLowerCase() as StatusType;
-  const config = statusConfig[normalizedStatus] || { 
-    label: status, 
-    className: 'bg-muted text-muted-foreground' 
-  };
+export const StatusBadge = React.forwardRef<HTMLDivElement, StatusBadgeProps>(
+  ({ status, className }, ref) => {
+    const normalizedStatus = String(status || '').toLowerCase() as StatusType;
+    const config = statusConfig[normalizedStatus] || {
+      label: status,
+      className: 'bg-muted text-muted-foreground',
+    };
 
-  return (
-    <Badge className={cn(config.className, className)}>
-      {config.label}
-    </Badge>
-  );
-};
+    return (
+      <Badge ref={ref} className={cn(config.className, className)}>
+        {config.label}
+      </Badge>
+    );
+  },
+);
+
+StatusBadge.displayName = 'StatusBadge';
