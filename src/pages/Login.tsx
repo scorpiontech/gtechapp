@@ -16,15 +16,16 @@ const Login: React.FC = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  const isValidCPF = cpf.replace(/\D/g, '').length === 11;
+  const docDigits = cpf.replace(/\D/g, '');
+  const isValidDoc = docDigits.length === 11 || docDigits.length === 14;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!isValidCPF) {
+    if (!isValidDoc) {
       toast({
-        title: 'CPF inválido',
-        description: 'Digite um CPF válido com 11 dígitos.',
+        title: 'Documento inválido',
+        description: 'Digite um CPF (11 dígitos) ou CNPJ (14 dígitos) válido.',
         variant: 'destructive',
       });
       return;
@@ -73,7 +74,7 @@ const Login: React.FC = () => {
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-6">
               <div className="space-y-2">
-                <Label htmlFor="cpf">CPF</Label>
+                <Label htmlFor="cpf">CPF ou CNPJ</Label>
                 <CPFInput
                   value={cpf}
                   onChange={setCpf}
@@ -85,7 +86,7 @@ const Login: React.FC = () => {
               <Button
                 type="submit"
                 className="w-full h-12 text-base font-semibold"
-                disabled={!isValidCPF || isSubmitting}
+                disabled={!isValidDoc || isSubmitting}
               >
                 {isSubmitting ? (
                   <>

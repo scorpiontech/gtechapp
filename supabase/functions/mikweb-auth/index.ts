@@ -63,7 +63,7 @@ serve(async (req) => {
     if (!Array.isArray(clientes) || clientes.length === 0) {
       return new Response(
         JSON.stringify({ success: false, error: 'CPF/CNPJ não encontrado' }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 404 }
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
       );
     }
 
@@ -79,7 +79,7 @@ serve(async (req) => {
     if (!clienteEncontrado) {
       return new Response(
         JSON.stringify({ success: false, error: 'CPF/CNPJ não encontrado' }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 404 }
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
       );
     }
 
