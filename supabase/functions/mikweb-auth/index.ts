@@ -16,7 +16,7 @@ serve(async (req) => {
 
     if (!cpf) {
       return new Response(
-        JSON.stringify({ success: false, error: 'CPF é obrigatório' }),
+        JSON.stringify({ success: false, error: 'CPF/CNPJ é obrigatório' }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
       );
     }
@@ -30,23 +30,25 @@ serve(async (req) => {
       );
     }
 
-    console.log('Token length:', apiToken.length, 'Token starts with:', apiToken.substring(0, 10) + '...');
+    const authHeaders = {
+      'Authorization': `Bearer ${apiToken}`,
+      'Content-Type': 'application/json',
+    };
+
+    console.log('Token length:', apiToken.length);
     
-    // Buscar cliente na API MikWeb filtrando por CPF
-    const url = `https://api.mikweb.com.br/v1/admin/customers?cpf_cnpj=${cpf}`;
-    console.log('Fetching URL:', url);
+    // Buscar cliente na API MikWeb filtrando por CPF/CNPJ
+    const cpfLimpo = cpf.replace(/\D/g, '');
+    const url = `https://api.mikweb.com.br/v1/admin/customers?cpf_cnpj=${cpfLimpo}`;
+    console.log('Fetching customers URL:', url);
     
     const response = await fetch(url, {
       method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${apiToken}`,
-        'Content-Type': 'application/json',
-      },
+      headers: authHeaders,
     });
 
     const responseText = await response.text();
     console.log('MikWeb API response status:', response.status);
-    console.log('MikWeb API response:', responseText);
 
     if (!response.ok) {
       return new Response(
@@ -56,8 +58,6 @@ serve(async (req) => {
     }
 
     const data = JSON.parse(responseText);
-
-    // A API retorna um objeto com customers array
     const clientes = data.customers || data.data || [];
     
     if (!Array.isArray(clientes) || clientes.length === 0) {
@@ -67,13 +67,10 @@ serve(async (req) => {
       );
     }
 
-    // Normalizar CPF/CNPJ para comparação (remover formatação)
-    const cpfNormalizado = cpf.replace(/\D/g, '');
-    
     // Filtrar pelo CPF/CNPJ exato
     const clienteEncontrado = clientes.find((c: any) => {
       const cpfCliente = (c.cpf_cnpj || '').replace(/\D/g, '');
-      return cpfCliente === cpfNormalizado;
+      return cpfCliente === cpfLimpo;
     });
 
     if (!clienteEncontrado) {
@@ -85,8 +82,41 @@ serve(async (req) => {
 
     const cliente = clienteEncontrado;
 
+    // Buscar dados do contrato se existir
+    let contratoData: any = null;
+    const contractIds = cliente.customer_contract_ids || [];
+    
+    if (contractIds.length > 0) {
+      const contractId = contractIds[0]; // Pegar o primeiro contrato
+      console.log('Fetching contract:', contractId);
+      
+      try {
+        const contractUrl = `https://api.mikweb.com.br/v1/admin/customer_contracts/${contractId}`;
+        const contractResponse = await fetch(contractUrl, {
+          method: 'GET',
+          headers: authHeaders,
+        });
+        
+        if (contractResponse.ok) {
+          const contractText = await contractResponse.text();
+          console.log('Contract response:', contractText.substring(0, 500));
+          const contractJson = JSON.parse(contractText);
+          contratoData = contractJson.customer_contract || contractJson.data || contractJson;
+        } else {
+          console.log('Contract fetch failed:', contractResponse.status);
+        }
+      } catch (err) {
+        console.error('Error fetching contract:', err);
+      }
+    }
+
     // Verificar status financeiro para determinar se está bloqueado
     const isBloqueado = cliente.financial_status === 'B' || cliente.status === 'Bloqueado';
+
+    // Extrair dados do plano do contrato ou do cliente
+    const planoNome = contratoData?.plan?.name || cliente.plan?.name || null;
+    const valorPlano = contratoData?.plan?.value || contratoData?.value || cliente.plan?.value || null;
+    const vencimento = contratoData?.due_day || cliente.due_day || null;
 
     return new Response(
       JSON.stringify({ 
@@ -107,12 +137,13 @@ serve(async (req) => {
           status: cliente.status,
           data_cadastro: cliente.customer_since,
           login: cliente.login,
-          plano: cliente.plan?.id,
-          plano_nome: cliente.plan?.name,
-          valor_plano: cliente.plan?.value,
-          vencimento: cliente.due_day,
+          plano: contratoData?.plan?.id || cliente.plan?.id,
+          plano_nome: planoNome,
+          valor_plano: valorPlano,
+          vencimento: vencimento,
           bloqueado: isBloqueado,
           servidor: cliente.server?.name,
+          contrato_id: contractIds[0] || null,
         }
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
