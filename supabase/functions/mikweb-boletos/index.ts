@@ -31,7 +31,7 @@ serve(async (req) => {
     }
 
     // Buscar boletos do cliente na API MikWeb
-    const response = await fetch(`https://api.mikweb.com.br/v1/admin/financeiro/titulos?cliente_id=${cliente_id}`, {
+    const response = await fetch(`https://api.mikweb.com.br/v1/admin/billings?customer_id=${cliente_id}`, {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${apiToken}`,
@@ -48,20 +48,20 @@ serve(async (req) => {
     }
 
     const data = await response.json();
-    const titulos = data.titulos || data.data || data;
+    const titulos = data.billings || data.data || [];
 
     // Mapear os títulos para o formato esperado pelo frontend
-    const boletos = Array.isArray(titulos) ? titulos.map((titulo: any) => ({
-      id: titulo.id,
-      cliente_id: titulo.cliente_id,
-      valor: parseFloat(titulo.valor) || 0,
-      vencimento: titulo.vencimento || titulo.data_vencimento,
-      data_emissao: titulo.data_emissao || titulo.created_at,
-      status: titulo.status || titulo.situacao,
-      linha_digitavel: titulo.linha_digitavel || titulo.codigo_barras_linha,
-      codigo_barras: titulo.codigo_barras,
-      link_boleto: titulo.link_boleto || titulo.url_boleto || titulo.link,
-      nosso_numero: titulo.nosso_numero,
+    const boletos = Array.isArray(titulos) ? titulos.map((billing: any) => ({
+      id: billing.id,
+      cliente_id: billing.customer_id,
+      valor: parseFloat(billing.value) || 0,
+      vencimento: billing.due_date,
+      data_emissao: billing.created_at,
+      status: billing.status,
+      linha_digitavel: billing.digitable_line || billing.barcode_line,
+      codigo_barras: billing.barcode,
+      link_boleto: billing.billing_url || billing.url,
+      nosso_numero: billing.our_number,
     })) : [];
 
     // Ordenar por vencimento (mais recentes primeiro)

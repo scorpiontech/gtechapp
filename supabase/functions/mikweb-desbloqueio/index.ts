@@ -12,7 +12,7 @@ serve(async (req) => {
   }
 
   try {
-    const { cliente_id, conexao_id } = await req.json();
+    const { cliente_id } = await req.json();
 
     if (!cliente_id) {
       return new Response(
@@ -30,47 +30,15 @@ serve(async (req) => {
       );
     }
 
-    // Se não tiver conexao_id, buscar a conexão do cliente
-    let targetConexaoId = conexao_id;
-    
-    if (!targetConexaoId) {
-      // Buscar conexões do cliente
-      const conexoesResponse = await fetch(`https://api.mikweb.com.br/v1/admin/conexoes?cliente_id=${cliente_id}`, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${apiToken}`,
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (conexoesResponse.ok) {
-        const conexoesData = await conexoesResponse.json();
-        const conexoes = conexoesData.conexoes || conexoesData.data || conexoesData;
-        
-        if (Array.isArray(conexoes) && conexoes.length > 0) {
-          targetConexaoId = conexoes[0].id;
-        }
-      }
-    }
-
-    if (!targetConexaoId) {
-      return new Response(
-        JSON.stringify({ success: false, error: 'Conexão não encontrada para este cliente' }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 404 }
-      );
-    }
-
-    // Realizar o desbloqueio via API MikWeb
-    // Endpoint pode variar dependendo da versão da API
-    const desbloqueioResponse = await fetch(`https://api.mikweb.com.br/v1/admin/conexoes/${targetConexaoId}/desbloquear`, {
-      method: 'POST',
+    // Alterar status de acesso do cliente para Liberado (L)
+    const desbloqueioResponse = await fetch(`https://api.mikweb.com.br/v1/admin/customers/${cliente_id}/access_status`, {
+      method: 'PUT',
       headers: {
         'Authorization': `Bearer ${apiToken}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        motivo: 'Autodesbloqueio via app cliente',
-        temporario: true,
+        access_status: 'L', // L = Liberado
       }),
     });
 
@@ -78,24 +46,10 @@ serve(async (req) => {
       const errorText = await desbloqueioResponse.text();
       console.error('MikWeb desbloqueio error:', desbloqueioResponse.status, errorText);
       
-      // Tentar endpoint alternativo
-      const altResponse = await fetch(`https://api.mikweb.com.br/v1/admin/clientes/${cliente_id}/desbloquear`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${apiToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          motivo: 'Autodesbloqueio via app cliente',
-        }),
-      });
-
-      if (!altResponse.ok) {
-        return new Response(
-          JSON.stringify({ success: false, error: 'Não foi possível realizar o desbloqueio. Entre em contato com o suporte.' }),
-          { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
-        );
-      }
+      return new Response(
+        JSON.stringify({ success: false, error: 'Não foi possível realizar o desbloqueio. Entre em contato com o suporte.' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
+      );
     }
 
     return new Response(
