@@ -1,4 +1,5 @@
 import React from 'react';
+import { cn } from '@/lib/utils';
 import { MobileHeader } from './MobileHeader';
 import { BottomNav } from './BottomNav';
 
@@ -30,5 +31,3 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
     </div>
   );
 };
-
-import { cn } from '@/lib/utils';
