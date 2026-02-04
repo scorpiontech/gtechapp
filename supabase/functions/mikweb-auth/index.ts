@@ -30,8 +30,13 @@ serve(async (req) => {
       );
     }
 
+    console.log('Token length:', apiToken.length, 'Token starts with:', apiToken.substring(0, 10) + '...');
+    
     // Buscar cliente na API MikWeb filtrando por CPF
-    const response = await fetch(`https://api.mikweb.com.br/v1/admin/customers?cpf_cnpj=${cpf}`, {
+    const url = `https://api.mikweb.com.br/v1/admin/customers?cpf_cnpj=${cpf}`;
+    console.log('Fetching URL:', url);
+    
+    const response = await fetch(url, {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${apiToken}`,
@@ -39,15 +44,18 @@ serve(async (req) => {
       },
     });
 
+    const responseText = await response.text();
+    console.log('MikWeb API response status:', response.status);
+    console.log('MikWeb API response:', responseText);
+
     if (!response.ok) {
-      console.error('MikWeb API error:', response.status, await response.text());
       return new Response(
-        JSON.stringify({ success: false, error: 'Erro ao consultar dados' }),
+        JSON.stringify({ success: false, error: 'Erro ao consultar dados', details: responseText }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
       );
     }
 
-    const data = await response.json();
+    const data = JSON.parse(responseText);
 
     // A API retorna um objeto com customers array
     const clientes = data.customers || data.data || [];
