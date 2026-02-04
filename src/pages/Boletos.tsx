@@ -67,7 +67,11 @@ const Boletos: React.FC = () => {
     const hoje = new Date();
     hoje.setHours(0, 0, 0, 0);
 
-    if (boleto.status?.toLowerCase() === 'pago') return 'pago';
+    // Garantir que status seja tratado como string
+    const statusStr = String(boleto.status || '').toLowerCase();
+    
+    if (statusStr === 'pago' || statusStr === 'paid' || statusStr === 'p') return 'pago';
+    if (statusStr === 'cancelado' || statusStr === 'canceled' || statusStr === 'c') return 'cancelado';
     if (vencimento < hoje) return 'vencido';
     return 'aberto';
   };
