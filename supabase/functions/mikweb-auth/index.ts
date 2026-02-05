@@ -90,71 +90,71 @@ serve(async (req) => {
       );
     }
 
-    const cliente = clienteEncontrado;
-
-    // Log plan_id and due_day from customer
-    console.log('Customer plan_id:', cliente.plan_id);
-    console.log('Customer due_day:', cliente.due_day);
-
-    // Buscar dados do plano se existir plan_id
-    let planoData: any = null;
-    if (cliente.plan_id) {
-      try {
-        const planUrl = `https://api.mikweb.com.br/v1/admin/plans/${cliente.plan_id}`;
-        console.log('Fetching plan:', cliente.plan_id);
-        const planResponse = await fetch(planUrl, {
-          method: 'GET',
-          headers: authHeaders,
-        });
-        
-        if (planResponse.ok) {
-          const planText = await planResponse.text();
-          console.log('Plan response:', planText.substring(0, 300));
-          const planJson = JSON.parse(planText);
-          planoData = planJson.plan || planJson.data || planJson;
-        } else {
-          console.log('Plan fetch failed:', planResponse.status);
-        }
-      } catch (err) {
-        console.error('Error fetching plan:', err);
-      }
-    }
-
-    // Buscar dados do contrato se existir
-    let contratoData: any = null;
-    const contractIds = cliente.customer_contract_ids || [];
+    // A busca por search retorna dados limitados, precisamos buscar o cliente por ID para obter todos os dados
+    const clienteId = clienteEncontrado.id;
+    console.log('Found customer ID:', clienteId);
+    console.log('Fetching full customer details...');
     
-    if (contractIds.length > 0) {
-      const contractId = contractIds[0];
-      console.log('Fetching contract:', contractId);
-      
-      try {
-        const contractUrl = `https://api.mikweb.com.br/v1/admin/customer_contracts/${contractId}`;
-        const contractResponse = await fetch(contractUrl, {
-          method: 'GET',
-          headers: authHeaders,
-        });
-        
-        if (contractResponse.ok) {
-          const contractText = await contractResponse.text();
-          console.log('Contract response:', contractText.substring(0, 300));
-          const contractJson = JSON.parse(contractText);
-          contratoData = contractJson.customer_contract || contractJson.data || contractJson;
-        } else {
-          console.log('Contract fetch failed:', contractResponse.status);
-        }
-      } catch (err) {
-        console.error('Error fetching contract:', err);
-      }
+    const detailsUrl = `https://api.mikweb.com.br/v1/admin/customers/${clienteId}`;
+    const detailsResponse = await fetch(detailsUrl, {
+      method: 'GET',
+      headers: authHeaders,
+    });
+    
+    if (!detailsResponse.ok) {
+      console.log('Customer details fetch failed:', detailsResponse.status);
+      // Fallback para usar os dados da busca inicial se não conseguir buscar detalhes
+      const cliente = clienteEncontrado;
+      return new Response(
+        JSON.stringify({ 
+          success: true, 
+          cliente: {
+            id: cliente.id,
+            nome: cliente.full_name,
+            cpf_cnpj: cliente.cpf_cnpj,
+            email: cliente.email,
+            celular: cliente.cell_phone_number_1,
+            telefone: cliente.phone_number,
+            endereco: cliente.street,
+            numero: cliente.number,
+            bairro: cliente.neighborhood,
+            cidade: cliente.city,
+            estado: cliente.state,
+            cep: cliente.zip_code,
+            status: cliente.status,
+            data_cadastro: cliente.customer_since,
+            login: cliente.login,
+            plano: cliente.plan_id,
+            plano_nome: null,
+            valor_plano: null,
+            vencimento: cliente.due_day,
+            bloqueado: cliente.financial_status === 'B' || cliente.status === 'Bloqueado',
+            servidor: cliente.server?.name,
+            contrato_id: cliente.customer_contract_ids?.[0] || null,
+          }
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
+    
+    const detailsData = await detailsResponse.json();
+    const cliente = detailsData.customer || detailsData;
+    
+    console.log('Customer details loaded');
+    console.log('Plan object:', cliente.plan ? JSON.stringify(cliente.plan) : 'null');
+    console.log('Due day:', cliente.due_day);
 
     // Verificar status financeiro para determinar se está bloqueado
     const isBloqueado = cliente.financial_status === 'B' || cliente.status === 'Bloqueado';
 
-    // Extrair dados do plano - priorizar contrato, depois plano direto, depois cliente
-    const planoNome = contratoData?.plan?.name || planoData?.name || cliente.plan?.name || null;
-    const valorPlano = contratoData?.plan?.value || contratoData?.value || planoData?.value || cliente.plan?.value || null;
-    const vencimento = contratoData?.due_day || cliente.due_day || null;
+    // Extrair dados do plano do objeto plan retornado pela API
+    const planoNome = cliente.plan?.name || null;
+    const valorPlano = cliente.plan?.value ? parseFloat(cliente.plan.value) : null;
+    const vencimento = cliente.due_day || null;
+    
+    console.log('Extracted plano_nome:', planoNome);
+    console.log('Extracted valor_plano:', valorPlano);
+    console.log('Extracted vencimento:', vencimento);
 
     return new Response(
       JSON.stringify({ 
@@ -175,13 +175,13 @@ serve(async (req) => {
           status: cliente.status,
           data_cadastro: cliente.customer_since,
           login: cliente.login,
-          plano: contratoData?.plan?.id || cliente.plan?.id,
+          plano: cliente.plan?.id || cliente.plan_id,
           plano_nome: planoNome,
           valor_plano: valorPlano,
           vencimento: vencimento,
           bloqueado: isBloqueado,
           servidor: cliente.server?.name,
-          contrato_id: contractIds[0] || null,
+          contrato_id: cliente.customer_contract_ids?.[0] || null,
         }
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

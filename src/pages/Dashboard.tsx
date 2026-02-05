@@ -68,7 +68,7 @@ const Dashboard: React.FC = () => {
               </div>
               <div className="min-w-0">
                 <p className="text-xs text-muted-foreground">Plano</p>
-                <p className="font-semibold text-sm truncate">{cliente.plano_nome || cliente.plano}</p>
+                <p className="font-semibold text-sm truncate">{cliente.plano_nome || cliente.plano || 'Não informado'}</p>
               </div>
             </CardContent>
           </Card>
@@ -81,10 +81,12 @@ const Dashboard: React.FC = () => {
               <div className="min-w-0">
                 <p className="text-xs text-muted-foreground">Valor</p>
                 <p className="font-semibold text-sm">
-                  {new Intl.NumberFormat('pt-BR', { 
-                    style: 'currency', 
-                    currency: 'BRL' 
-                  }).format(cliente.valor_plano || 0)}
+                  {cliente.valor_plano 
+                    ? new Intl.NumberFormat('pt-BR', { 
+                        style: 'currency', 
+                        currency: 'BRL' 
+                      }).format(cliente.valor_plano)
+                    : 'Não informado'}
                 </p>
               </div>
             </CardContent>
@@ -97,7 +99,7 @@ const Dashboard: React.FC = () => {
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">Vencimento</p>
-                <p className="font-semibold text-sm">Todo dia {cliente.vencimento}</p>
+                <p className="font-semibold text-sm">{cliente.vencimento ? `Todo dia ${cliente.vencimento}` : 'Não informado'}</p>
               </div>
             </CardContent>
           </Card>
