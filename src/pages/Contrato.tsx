@@ -45,17 +45,19 @@ const Contrato: React.FC = () => {
     {
       title: 'Plano e Pagamento',
       items: [
-        { icon: Wifi, label: 'Plano', value: cliente.plano_nome || cliente.plano },
+        { icon: Wifi, label: 'Plano', value: cliente.plano_nome || cliente.plano || 'Não informado' },
         { 
           icon: CreditCard, 
           label: 'Valor', 
-          value: new Intl.NumberFormat('pt-BR', { 
-            style: 'currency', 
-            currency: 'BRL' 
-          }).format(cliente.valor_plano || 0)
+          value: cliente.valor_plano 
+            ? new Intl.NumberFormat('pt-BR', { 
+                style: 'currency', 
+                currency: 'BRL' 
+              }).format(cliente.valor_plano)
+            : 'Não informado'
         },
-        { icon: Calendar, label: 'Vencimento', value: `Dia ${cliente.vencimento}` },
-        { icon: Calendar, label: 'Cliente desde', value: new Date(cliente.data_cadastro).toLocaleDateString('pt-BR') },
+        { icon: Calendar, label: 'Vencimento', value: cliente.vencimento ? `Dia ${cliente.vencimento}` : 'Não informado' },
+        { icon: Calendar, label: 'Cliente desde', value: cliente.data_cadastro ? new Date(cliente.data_cadastro).toLocaleDateString('pt-BR') : 'Não informado' },
       ],
     },
   ];
