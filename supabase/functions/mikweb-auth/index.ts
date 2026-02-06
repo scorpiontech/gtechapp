@@ -143,6 +143,8 @@ serve(async (req) => {
     console.log('Customer details loaded');
     console.log('Plan object:', cliente.plan ? JSON.stringify(cliente.plan) : 'null');
     console.log('Due day:', cliente.due_day);
+    console.log('Observation:', cliente.observation);
+    console.log('Additional observation:', cliente.additional_observation);
 
     // Verificar status financeiro para determinar se está bloqueado
     const isBloqueado = cliente.financial_status === 'B' || cliente.status === 'Bloqueado';
@@ -180,6 +182,47 @@ serve(async (req) => {
         console.log('Plan name from API:', planoNome);
       } else {
         console.log('Plan fetch failed:', planRes.status);
+      }
+    }
+
+    // 1.2) Tentar extrair nome do plano dos campos de observação (campo personalizado)
+    // O provedor pode usar formato: "Plano: 100 Mega" ou "[PLANO] 100 Mega" ou apenas o nome do plano
+    if (!planoNome) {
+      const obs = cliente.observation?.trim() || '';
+      const addObs = cliente.additional_observation?.trim() || '';
+      console.log('Customer observation:', obs || '(empty)');
+      console.log('Customer additional_observation:', addObs || '(empty)');
+      
+      // Tentar extrair plano do campo observation ou additional_observation
+      const extractPlanFromText = (text: string): string | null => {
+        if (!text) return null;
+        
+        // Padrões comuns: "Plano: X", "[PLANO] X", "PLANO X", ou apenas uma linha curta
+        const patterns = [
+          /plano[:\s]+(.+)/i,
+          /\[plano\]\s*(.+)/i,
+          /internet[:\s]+(.+)/i,
+          /velocidade[:\s]+(.+)/i,
+        ];
+        
+        for (const pattern of patterns) {
+          const match = text.match(pattern);
+          if (match && match[1]) {
+            return match[1].trim();
+          }
+        }
+        
+        // Se o texto for curto (< 50 chars) e parecer um nome de plano, usar diretamente
+        if (text.length < 50 && /\d+\s*(mega|mb|gb)/i.test(text)) {
+          return text;
+        }
+        
+        return null;
+      };
+      
+      planoNome = extractPlanFromText(obs) || extractPlanFromText(addObs);
+      if (planoNome) {
+        console.log('Plan name extracted from observation:', planoNome);
       }
     }
 
