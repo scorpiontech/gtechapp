@@ -163,6 +163,25 @@ serve(async (req) => {
     console.log('Extracted plano_nome (from customer.plan):', planoNome);
     console.log('Extracted valor_plano (from customer.plan):', valorPlano);
     console.log('Extracted vencimento (from customer.due_day):', vencimento);
+    console.log('Customer plan_id:', cliente.plan_id);
+
+    // 1.1) Se cliente tem plan_id mas não veio o objeto plan, buscar o plano diretamente
+    if (!planoNome && cliente.plan_id) {
+      const planUrl = `https://api.mikweb.com.br/v1/admin/plans/${cliente.plan_id}`;
+      console.log('Fetching plan from customer plan_id:', planUrl);
+      
+      const planRes = await fetch(planUrl, { method: 'GET', headers: authHeaders });
+      if (planRes.ok) {
+        const planJson: any = await planRes.json();
+        const plan = planJson?.plan || planJson;
+        console.log('Plan fields:', plan ? Object.keys(plan).join(', ') : 'null');
+        planoNome = plan?.name ?? null;
+        valorPlano = valorPlano ?? toNumberOrNull(plan?.value);
+        console.log('Plan name from API:', planoNome);
+      } else {
+        console.log('Plan fetch failed:', planRes.status);
+      }
+    }
 
     // 2) Se ainda estiver faltando, tentar buscar pelo contrato (customer_contracts / customer_contract_ids)
     const contratoId = Array.isArray(cliente.customer_contract_ids) ? cliente.customer_contract_ids[0] : null;
@@ -172,10 +191,10 @@ serve(async (req) => {
       if (!contrato) return;
       console.log(`Applying contract data from ${source}`);
       console.log('Contract fields:', Object.keys(contrato).join(', '));
+      console.log('Contract name:', contrato.name);
+      console.log('Contract description:', contrato.description);
 
-      // Nome/valor/vencimento podem vir em formatos diferentes dependendo da estrutura do provedor
-      // Priorizar nome do plano real (plan.name) ou template (contract_template) em vez do nome do contrato
-      planoNome = planoNome ?? contrato.plan?.name ?? contrato.plan_name ?? contrato.plan?.title ?? null;
+      // Extrair valor e vencimento do contrato
       valorPlano =
         valorPlano ??
         toNumberOrNull(
@@ -192,7 +211,6 @@ serve(async (req) => {
         if (repeatOn === null || repeatOn === undefined) return null;
         if (typeof repeatOn === 'number') return repeatOn;
         const s = String(repeatOn).trim();
-        // YYYY-MM-DD
         if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
           const d = new Date(s + 'T00:00:00Z');
           return Number.isFinite(d.getTime()) ? d.getUTCDate() : null;
@@ -202,27 +220,71 @@ serve(async (req) => {
 
       vencimento = vencimento ?? toNumberOrNull(contrato.due_day ?? contrato.due_day_number ?? contrato.due_day_id) ?? dueFromRepeatOn;
 
-      // Buscar template do contrato se não temos nome do plano
-      const templateId = contrato.contract_template_id;
-      console.log('Contract template_id:', templateId);
-      if (!planoNome && templateId) {
-        const templateUrl = `https://api.mikweb.com.br/v1/admin/contract_templates/${templateId}`;
-        console.log('Fetching contract template URL:', templateUrl);
+      // 1) Tentar nome do plano diretamente do contrato (campos plan.name ou description do contrato)
+      // O campo 'name' do contrato geralmente é "Contrato do Cliente ID X", então preferimos 'description'
+      // ou usar o nome do plano vinculado
+      const contratoDescription = contrato.description?.trim();
+      planoNome = planoNome ?? contrato.plan?.name ?? contrato.plan_name ?? contrato.plan?.title ?? null;
+      
+      // Se description não está vazio e parece ser o nome do plano, usar
+      if (!planoNome && contratoDescription && contratoDescription.length > 0 && contratoDescription.length < 100) {
+        planoNome = contratoDescription;
+        console.log('Using contract description as plan name:', planoNome);
+      }
 
-        const templateRes = await fetch(templateUrl, { method: 'GET', headers: authHeaders });
-        if (templateRes.ok) {
-          const templateJson: any = await templateRes.json();
-          const template = templateJson?.contract_template || templateJson?.template || templateJson;
-          console.log('Template fields:', template ? Object.keys(template).join(', ') : 'null');
-          planoNome = template?.name ?? template?.title ?? template?.description ?? null;
-          console.log('Template name extracted:', planoNome);
+      // 2) Buscar itens do contrato para obter o plano de internet real (PRIORITÁRIO)
+      const cId = contrato.id;
+      if (!planoNome && cId) {
+        const itemsUrl = `https://api.mikweb.com.br/v1/admin/customer_contract_items?customer_contract_id=${cId}`;
+        console.log('Fetching contract items URL:', itemsUrl);
+
+        const itemsRes = await fetch(itemsUrl, { method: 'GET', headers: authHeaders });
+        console.log('Contract items response status:', itemsRes.status);
+        
+        if (itemsRes.ok) {
+          const itemsJson: any = await itemsRes.json();
+          const items = itemsJson?.customer_contract_items || itemsJson?.items || itemsJson?.data || [];
+          console.log('Contract items count:', Array.isArray(items) ? items.length : 0);
+          
+          if (Array.isArray(items) && items.length > 0) {
+            for (const item of items) {
+              console.log('Item fields:', Object.keys(item).join(', '));
+              
+              const itemPlanName = item.plan?.name || item.plan_name || item.name || item.description || item.title;
+              const itemPlanId = item.plan_id || item.plan?.id;
+              
+              if (itemPlanName && !planoNome) {
+                planoNome = itemPlanName;
+                console.log('Plan name from contract item:', planoNome);
+              }
+              
+              if (!planoNome && itemPlanId) {
+                const planUrl = `https://api.mikweb.com.br/v1/admin/plans/${itemPlanId}`;
+                console.log('Fetching plan from item plan_id:', planUrl);
+                
+                const planRes = await fetch(planUrl, { method: 'GET', headers: authHeaders });
+                if (planRes.ok) {
+                  const planJson: any = await planRes.json();
+                  const plan = planJson?.plan || planJson;
+                  planoNome = plan?.name ?? null;
+                  console.log('Plan name from plans API:', planoNome);
+                  if (valorPlano === null) {
+                    valorPlano = toNumberOrNull(plan?.value);
+                  }
+                }
+              }
+              
+              if (planoNome) break;
+            }
+          }
         } else {
-          console.log('Contract template fetch failed:', templateRes.status);
+          console.log('Contract items fetch failed');
         }
       }
 
+      // 3) Fallback: buscar pelo plan_id do contrato
       const planId = contrato.plan_id ?? contrato.plan?.id;
-      if ((!planoNome || valorPlano === null) && planId) {
+      if (!planoNome && planId) {
         const planUrl = `https://api.mikweb.com.br/v1/admin/plans/${planId}`;
         console.log('Fetching plan from contract plan_id URL:', planUrl);
 
@@ -230,10 +292,23 @@ serve(async (req) => {
         if (planRes.ok) {
           const planJson: any = await planRes.json();
           const plan = planJson?.plan || planJson;
-          planoNome = planoNome ?? plan?.name ?? null;
+          planoNome = plan?.name ?? null;
           valorPlano = valorPlano ?? toNumberOrNull(plan?.value);
-        } else {
-          console.log('Plan fetch (from contract) failed:', planRes.status);
+        }
+      }
+      
+      // 4) Último fallback: template do contrato (menos desejável)
+      const templateId = contrato.contract_template_id;
+      if (!planoNome && templateId) {
+        const templateUrl = `https://api.mikweb.com.br/v1/admin/contract_templates/${templateId}`;
+        console.log('Fetching contract template URL (fallback):', templateUrl);
+
+        const templateRes = await fetch(templateUrl, { method: 'GET', headers: authHeaders });
+        if (templateRes.ok) {
+          const templateJson: any = await templateRes.json();
+          const template = templateJson?.contract_template || templateJson?.template || templateJson;
+          planoNome = template?.name ?? template?.title ?? null;
+          console.log('Template name (fallback):', planoNome);
         }
       }
     };
