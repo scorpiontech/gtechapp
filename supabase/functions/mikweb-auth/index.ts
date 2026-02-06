@@ -147,18 +147,144 @@ serve(async (req) => {
     // Verificar status financeiro para determinar se está bloqueado
     const isBloqueado = cliente.financial_status === 'B' || cliente.status === 'Bloqueado';
 
-    // Extrair dados do plano do objeto plan retornado pela API
-    const planoNome = cliente.plan?.name || null;
-    const valorPlano = cliente.plan?.value ? parseFloat(cliente.plan.value) : null;
-    const vencimento = cliente.due_day || null;
-    
-    console.log('Extracted plano_nome:', planoNome);
-    console.log('Extracted valor_plano:', valorPlano);
-    console.log('Extracted vencimento:', vencimento);
+    const toNumberOrNull = (v: unknown): number | null => {
+      if (v === null || v === undefined) return null;
+      if (typeof v === 'number' && Number.isFinite(v)) return v;
+      const s = String(v).replace(',', '.').trim();
+      const n = Number(s);
+      return Number.isFinite(n) ? n : null;
+    };
+
+    // 1) Tentar extrair do objeto plan retornado no detalhe do cliente
+    let planoNome: string | null = cliente.plan?.name ?? null;
+    let valorPlano: number | null = toNumberOrNull(cliente.plan?.value);
+    let vencimento: number | null = toNumberOrNull(cliente.due_day);
+
+    console.log('Extracted plano_nome (from customer.plan):', planoNome);
+    console.log('Extracted valor_plano (from customer.plan):', valorPlano);
+    console.log('Extracted vencimento (from customer.due_day):', vencimento);
+
+    // 2) Se ainda estiver faltando, tentar buscar pelo contrato (customer_contracts / customer_contract_ids)
+    const contratoId = Array.isArray(cliente.customer_contract_ids) ? cliente.customer_contract_ids[0] : null;
+    const contratoFromCustomer = Array.isArray(cliente.customer_contracts) ? cliente.customer_contracts[0] : null;
+
+    const applyContratoData = async (contrato: any, source: string) => {
+      if (!contrato) return;
+      console.log(`Applying contract data from ${source}`);
+      console.log('Contract fields:', Object.keys(contrato).join(', '));
+
+      // Nome/valor/vencimento podem vir em formatos diferentes dependendo da estrutura do provedor
+      planoNome = planoNome ?? contrato.plan?.name ?? contrato.plan_name ?? contrato.plan?.title ?? contrato.name ?? null;
+      valorPlano =
+        valorPlano ??
+        toNumberOrNull(
+          contrato.plan?.value ??
+            contrato.value ??
+            contrato.plan_value ??
+            contrato.monthly_value ??
+            contrato.total ??
+            contrato.subtotal
+        );
+
+      const repeatOn = contrato.repeat_on;
+      const dueFromRepeatOn = (() => {
+        if (repeatOn === null || repeatOn === undefined) return null;
+        if (typeof repeatOn === 'number') return repeatOn;
+        const s = String(repeatOn).trim();
+        // YYYY-MM-DD
+        if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+          const d = new Date(s + 'T00:00:00Z');
+          return Number.isFinite(d.getTime()) ? d.getUTCDate() : null;
+        }
+        return toNumberOrNull(s);
+      })();
+
+      vencimento = vencimento ?? toNumberOrNull(contrato.due_day ?? contrato.due_day_number ?? contrato.due_day_id) ?? dueFromRepeatOn;
+
+      const planId = contrato.plan_id ?? contrato.plan?.id;
+      if ((!planoNome || valorPlano === null) && planId) {
+        const planUrl = `https://api.mikweb.com.br/v1/admin/plans/${planId}`;
+        console.log('Fetching plan from contract plan_id URL:', planUrl);
+
+        const planRes = await fetch(planUrl, { method: 'GET', headers: authHeaders });
+        if (planRes.ok) {
+          const planJson: any = await planRes.json();
+          const plan = planJson?.plan || planJson;
+          planoNome = planoNome ?? plan?.name ?? null;
+          valorPlano = valorPlano ?? toNumberOrNull(plan?.value);
+        } else {
+          console.log('Plan fetch (from contract) failed:', planRes.status);
+        }
+      }
+    };
+
+    if (!planoNome || valorPlano === null || vencimento === null) {
+      // 2.0) Preferir usar o objeto já embutido no retorno do cliente
+      if (contratoFromCustomer) {
+        await applyContratoData(contratoFromCustomer, 'customer.customer_contracts[0]');
+      }
+
+      // 2.1) Tentativa adicional: listar contratos por customer_id (normalmente retorna mais dados)
+      if ((!planoNome || valorPlano === null || vencimento === null) && cliente.id) {
+        const listUrl = `https://api.mikweb.com.br/v1/admin/customer_contracts?customer_id=${cliente.id}`;
+        console.log('Listing customer contracts URL:', listUrl);
+
+        const listRes = await fetch(listUrl, { method: 'GET', headers: authHeaders });
+        const listText = await listRes.text();
+        console.log('Customer contracts list response status:', listRes.status);
+
+        if (listRes.ok) {
+          let listJson: any = null;
+          try {
+            listJson = JSON.parse(listText);
+          } catch {
+            listJson = null;
+          }
+
+          const contratos = listJson?.customer_contracts || listJson?.contracts || listJson?.data || listJson;
+          const contrato0 = Array.isArray(contratos) ? contratos[0] : null;
+          if (contrato0) {
+            await applyContratoData(contrato0, 'GET /customer_contracts?customer_id=');
+          } else {
+            console.log('No contracts returned on list endpoint');
+          }
+        } else {
+          console.log('Customer contracts list fetch failed:', listText);
+        }
+      }
+
+      // 2.2) Tentativa extra: alguns painéis exibem contrato por ID, mas nem sempre existe endpoint público
+      if ((!planoNome || valorPlano === null || vencimento === null) && contratoId) {
+        const contractUrl = `https://api.mikweb.com.br/v1/admin/customer_contracts/${contratoId}`;
+        console.log('Fetching customer contract URL:', contractUrl);
+
+        const contractRes = await fetch(contractUrl, { method: 'GET', headers: authHeaders });
+        const contractText = await contractRes.text();
+        console.log('Customer contract response status:', contractRes.status);
+
+        if (contractRes.ok) {
+          let contractJson: any = null;
+          try {
+            contractJson = JSON.parse(contractText);
+          } catch {
+            contractJson = null;
+          }
+
+          const contrato = contractJson?.customer_contract || contractJson?.contract || contractJson;
+          await applyContratoData(contrato, 'GET /customer_contracts/{id}');
+        } else {
+          console.log('Customer contract fetch failed:', contractText);
+        }
+      }
+    }
+
+    console.log('Final plano_nome:', planoNome);
+    console.log('Final valor_plano:', valorPlano);
+    console.log('Final vencimento:', vencimento);
 
     return new Response(
-      JSON.stringify({ 
-        success: true, 
+      JSON.stringify({
+        success: true,
         cliente: {
           id: cliente.id,
           nome: cliente.full_name,
@@ -181,8 +307,8 @@ serve(async (req) => {
           vencimento: vencimento,
           bloqueado: isBloqueado,
           servidor: cliente.server?.name,
-          contrato_id: cliente.customer_contract_ids?.[0] || null,
-        }
+          contrato_id: contratoId || null,
+        },
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );

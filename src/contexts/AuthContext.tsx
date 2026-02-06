@@ -35,6 +35,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           cliente,
           loading: false,
         });
+
+        // Atualiza dados do cliente em background (plano/valor/vencimento podem mudar)
+        (async () => {
+          try {
+            const cpf = String(cliente?.cpf_cnpj || '').replace(/\D/g, '');
+            if (!cpf) return;
+
+            const { data, error } = await supabase.functions.invoke('mikweb-auth', {
+              body: { cpf },
+            });
+
+            if (error || !data?.success || !data?.cliente) return;
+
+            localStorage.setItem('gtech_cliente', JSON.stringify(data.cliente));
+            setState({
+              isAuthenticated: true,
+              cliente: data.cliente,
+              loading: false,
+            });
+          } catch {
+            // silencioso: mantém dados salvos
+          }
+        })();
       } catch {
         localStorage.removeItem('gtech_cliente');
         setState(prev => ({ ...prev, loading: false }));
