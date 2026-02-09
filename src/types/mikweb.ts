@@ -22,6 +22,7 @@ export interface MikWebCliente {
   valor_plano: number;
   vencimento: number;
   bloqueado: boolean;
+  access_status?: string | null;
   conexao_id?: number;
   conexao_login?: string;
 }

@@ -28,7 +28,18 @@ const Desbloqueio: React.FC = () => {
 
   if (!cliente) return null;
 
-  const isBloqueado = cliente?.bloqueado ?? false;
+  const accessStatus = cliente?.access_status;
+  const isBloqueado = accessStatus === 'B' || cliente?.bloqueado === true;
+
+  const statusLabel = (() => {
+    switch (accessStatus) {
+      case 'L': return 'Conexão liberada';
+      case 'B': return 'Conexão bloqueada';
+      case 'CA': return 'Bloqueio parcial';
+      case 'CM': return 'Bloqueio total';
+      default: return cliente?.bloqueado ? 'Conexão bloqueada' : 'Conexão ativa';
+    }
+  })();
 
   const handleDesbloqueio = async () => {
     setStatus('loading');
@@ -87,7 +98,7 @@ const Desbloqueio: React.FC = () => {
             <div>
               <p className="text-sm text-muted-foreground">Status atual</p>
               <p className={`font-semibold ${isBloqueado ? 'text-destructive' : 'text-success'}`}>
-                {isBloqueado ? 'Conexão bloqueada' : 'Conexão ativa'}
+                {statusLabel}
               </p>
             </div>
           </CardContent>
