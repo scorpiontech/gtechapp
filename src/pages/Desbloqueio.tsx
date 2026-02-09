@@ -28,7 +28,7 @@ const Desbloqueio: React.FC = () => {
 
   if (!cliente) return null;
 
-  const isBloqueado = cliente.bloqueado;
+  const isBloqueado = cliente?.bloqueado ?? false;
 
   const handleDesbloqueio = async () => {
     setStatus('loading');
@@ -101,44 +101,33 @@ const Desbloqueio: React.FC = () => {
               Autodesbloqueio
             </CardTitle>
             <CardDescription>
-              {isBloqueado 
-                ? 'Sua conexão está bloqueada. Ao solicitar o desbloqueio, o boleto vencido será ajustado para o dia seguinte e sua conexão será liberada.'
-                : 'Sua conexão está ativa. Não é necessário realizar desbloqueio.'}
+              Ao solicitar o desbloqueio, o boleto vencido será ajustado para o dia seguinte e sua conexão será liberada.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             {status === 'idle' && (
-              <>
-                {isBloqueado ? (
-                  <AlertDialog>
-                    <AlertDialogTrigger asChild>
-                      <Button className="w-full h-12 text-base">
-                        <Unlock className="h-5 w-5 mr-2" />
-                        Solicitar Desbloqueio
-                      </Button>
-                    </AlertDialogTrigger>
-                    <AlertDialogContent>
-                      <AlertDialogHeader>
-                        <AlertDialogTitle>Confirmar Autodesbloqueio</AlertDialogTitle>
-                        <AlertDialogDescription>
-                          Ao confirmar, o boleto vencido terá seu vencimento alterado para amanhã e a situação será ajustada para "em observação". Sua conexão será liberada automaticamente.
-                        </AlertDialogDescription>
-                      </AlertDialogHeader>
-                      <AlertDialogFooter>
-                        <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                        <AlertDialogAction onClick={handleDesbloqueio}>
-                          Confirmar Desbloqueio
-                        </AlertDialogAction>
-                      </AlertDialogFooter>
-                    </AlertDialogContent>
-                  </AlertDialog>
-                ) : (
-                  <div className="flex items-center justify-center gap-2 py-4 text-success">
-                    <CheckCircle className="h-5 w-5" />
-                    <span className="font-medium">Conexão funcionando normalmente</span>
-                  </div>
-                )}
-              </>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button className="w-full h-12 text-base">
+                    <Unlock className="h-5 w-5 mr-2" />
+                    Solicitar Desbloqueio
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Confirmar Autodesbloqueio</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      Ao confirmar, o boleto vencido terá seu vencimento alterado para amanhã e a situação será ajustada para "em observação". Sua conexão será liberada automaticamente.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                    <AlertDialogAction onClick={handleDesbloqueio}>
+                      Confirmar Desbloqueio
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
             )}
 
             {status === 'loading' && (
