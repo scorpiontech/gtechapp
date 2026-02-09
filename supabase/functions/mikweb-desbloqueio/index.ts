@@ -98,6 +98,19 @@ serve(async (req) => {
 
     console.log(`Total billings fetched: ${allBillings.length}`);
 
+    // Log sample billing structure for debugging
+    if (allBillings.length > 0) {
+      console.log('Sample billing fields:', Object.keys(allBillings[0]).join(', '));
+      console.log('Sample billing:', JSON.stringify({
+        id: allBillings[0].id,
+        situation_id: allBillings[0].situation_id,
+        situation_name: allBillings[0].situation_name,
+        situation: allBillings[0].situation,
+        due_day: allBillings[0].due_day,
+        value: allBillings[0].value,
+      }));
+    }
+
     // 2. Encontrar boleto(s) vencido(s)
     const boletosVencidos = allBillings.filter((b: any) => {
       const sitName = (b.situation_name || b.situation?.name || '').toLowerCase().trim();
@@ -105,6 +118,9 @@ serve(async (req) => {
     });
 
     console.log(`Boletos vencidos encontrados: ${boletosVencidos.length}`);
+    boletosVencidos.forEach((b: any) => {
+      console.log(`Boleto vencido: id=${b.id}, value=${b.value}, due_day=${b.due_day}, situation_name=${b.situation_name || b.situation?.name}`);
+    });
 
     if (boletosVencidos.length === 0) {
       return new Response(
@@ -118,14 +134,16 @@ serve(async (req) => {
     tomorrow.setDate(tomorrow.getDate() + 1);
     const newDueDay = tomorrow.toISOString().split('T')[0];
 
-    // 4. Atualizar boletos vencidos
+    // 4. Atualizar SOMENTE os boletos vencidos (um por um)
     const updateResults: any[] = [];
 
     for (const boleto of boletosVencidos) {
-      console.log(`Atualizando boleto ${boleto.id} - valor: ${boleto.value}, vencimento: ${boleto.due_day}`);
+      const boletoId = boleto.id;
+      console.log(`Atualizando boleto ${boletoId} - valor: ${boleto.value}, vencimento: ${boleto.due_day}`);
 
-      const updateResponse = await fetch(
-        `https://api.mikweb.com.br/v1/admin/billings/${boleto.id}`,
+      // Tentar primeiro com billing (endpoint padrão MikWeb)
+      let updateResponse = await fetch(
+        `https://api.mikweb.com.br/v1/admin/billings/${boletoId}`,
         {
           method: 'PUT',
           headers: authHeaders,
@@ -136,11 +154,27 @@ serve(async (req) => {
         }
       );
 
+      // Se 404, tentar endpoint alternativo
+      if (updateResponse.status === 404) {
+        console.log(`Boleto ${boletoId} not found on /billings/, trying PATCH...`);
+        updateResponse = await fetch(
+          `https://api.mikweb.com.br/v1/admin/billings/${boletoId}`,
+          {
+            method: 'PATCH',
+            headers: authHeaders,
+            body: JSON.stringify({
+              due_day: newDueDay,
+              situation_id: 5,
+            }),
+          }
+        );
+      }
+
       const updateText = await updateResponse.text();
-      console.log(`Boleto ${boleto.id} update: ${updateResponse.status} - ${updateText}`);
+      console.log(`Boleto ${boletoId} update: ${updateResponse.status} - ${updateText}`);
 
       updateResults.push({
-        boleto_id: boleto.id,
+        boleto_id: boletoId,
         success: updateResponse.ok,
         status: updateResponse.status,
       });
@@ -149,14 +183,7 @@ serve(async (req) => {
     const allSuccess = updateResults.every((r) => r.success);
 
     if (!allSuccess) {
-      console.error('Some updates failed:', JSON.stringify(updateResults.filter((r) => !r.success)));
-      return new Response(
-        JSON.stringify({
-          success: false,
-          error: 'Não foi possível atualizar todos os boletos. Entre em contato com o suporte.',
-        }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+      console.warn('Some billing updates failed (proceeding with access unlock):', JSON.stringify(updateResults.filter((r) => !r.success)));
     }
 
     // 5. Liberar acesso

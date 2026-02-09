@@ -132,6 +132,7 @@ serve(async (req) => {
             access_status: cliente.access_status || cliente.financial_status || null,
             servidor: cliente.server?.name,
             contrato_id: cliente.customer_contract_ids?.[0] || null,
+            // Nota: neste fallback (sem detalhe do contrato), access_status vem do customer
           }
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -239,9 +240,17 @@ serve(async (req) => {
     const contratoId = Array.isArray(cliente.customer_contract_ids) ? cliente.customer_contract_ids[0] : null;
     const contratoFromCustomer = Array.isArray(cliente.customer_contracts) ? cliente.customer_contracts[0] : null;
 
+    let contractAccessStatus: string | null = null;
+
     const applyContratoData = async (contrato: any, source: string) => {
       if (!contrato) return;
       console.log(`Applying contract data from ${source}`);
+
+      // Capturar access_status do contrato (prioridade sobre o do cliente)
+      if (!contractAccessStatus && contrato.access_status) {
+        contractAccessStatus = contrato.access_status;
+        console.log('contract.access_status =', contractAccessStatus);
+      }
       console.log('Contract fields:', Object.keys(contrato).join(', '));
       console.log('Contract name:', contrato.name);
       console.log('Contract description:', contrato.description);
@@ -531,7 +540,7 @@ serve(async (req) => {
           valor_plano: valorPlano,
           vencimento: vencimento,
           bloqueado: isBloqueado,
-          access_status: cliente.access_status || cliente.financial_status || null,
+          access_status: contractAccessStatus || cliente.access_status || cliente.financial_status || null,
           servidor: cliente.server?.name,
           contrato_id: contratoId || null,
         },
