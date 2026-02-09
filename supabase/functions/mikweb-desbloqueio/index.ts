@@ -186,9 +186,10 @@ serve(async (req) => {
       console.warn('Some billing updates failed (proceeding with access unlock):', JSON.stringify(updateResults.filter((r) => !r.success)));
     }
 
-    // 5. Liberar acesso
+    // 5. Liberar acesso via PUT no customer
+    console.log(`Liberando acesso: PUT /customers/${cliente_id}`);
     const desbloqueioResponse = await fetch(
-      `https://api.mikweb.com.br/v1/admin/customers/${cliente_id}/access_status`,
+      `https://api.mikweb.com.br/v1/admin/customers/${cliente_id}`,
       {
         method: 'PUT',
         headers: authHeaders,
@@ -204,6 +205,8 @@ serve(async (req) => {
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
+
+    console.log('Acesso liberado com sucesso');
 
     // 6. Registrar o uso do desbloqueio
     const { error: insertError } = await supabase
