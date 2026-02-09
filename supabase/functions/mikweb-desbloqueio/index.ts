@@ -86,42 +86,30 @@ serve(async (req) => {
     let success = false;
 
     if (contractId) {
-      // Cliente usa estrutura de contratos - usar PUT /customer_contracts/<ID>/msg_payment
-      console.log(`Tentando liberar via PUT /customer_contracts/${contractId}/msg_payment...`);
-      const unlockResp = await fetch(
-        `https://api.mikweb.com.br/v1/admin/customer_contracts/${contractId}/msg_payment`,
-        {
-          method: 'PUT',
-          headers: authHeaders,
-          body: JSON.stringify({ msg_payment_mk: 'L' }),
-        }
-      );
+      // Tentar múltiplos endpoints para liberar acesso via contrato
+      const endpoints = [
+        { url: `https://api.mikweb.com.br/v1/admin/customer_contracts/${contractId}/access_status`, body: { access_status: 'access_activated' }, label: `customer_contracts/${contractId}/access_status` },
+        { url: `https://api.mikweb.com.br/v1/admin/customer_contracts/${contractId}/msg_payment`, body: { msg_payment_mk: 'L' }, label: `customer_contracts/${contractId}/msg_payment` },
+        { url: `https://api.mikweb.com.br/v1/admin/customers/${cliente_id}/msg_payment`, body: { msg_payment_mk: 'L' }, label: `customers/${cliente_id}/msg_payment` },
+      ];
 
-      const unlockText = await unlockResp.text();
-      console.log(`PUT /customer_contracts/${contractId}/msg_payment: ${unlockResp.status} - ${unlockText.substring(0, 600)}`);
-
-      if (unlockResp.ok) {
-        success = true;
-        console.log('Acesso liberado via contrato!');
-      } else {
-        console.error(`Falha via contrato: ${unlockResp.status}`);
-        
-        // Fallback: tentar via customer endpoint
-        console.log(`Fallback: tentando via PUT /customers/${cliente_id}/msg_payment...`);
-        const fallbackResp = await fetch(
-          `https://api.mikweb.com.br/v1/admin/customers/${cliente_id}/msg_payment`,
-          {
+      for (const ep of endpoints) {
+        if (success) break;
+        console.log(`Tentando: PUT /${ep.label}...`);
+        try {
+          const resp = await fetch(ep.url, {
             method: 'PUT',
             headers: authHeaders,
-            body: JSON.stringify({ msg_payment_mk: 'L' }),
+            body: JSON.stringify(ep.body),
+          });
+          const text = await resp.text();
+          console.log(`PUT /${ep.label}: ${resp.status} - ${text.substring(0, 400)}`);
+          if (resp.ok) {
+            success = true;
+            console.log(`Acesso liberado via ${ep.label}!`);
           }
-        );
-        const fallbackText = await fallbackResp.text();
-        console.log(`PUT /customers/${cliente_id}/msg_payment: ${fallbackResp.status} - ${fallbackText.substring(0, 600)}`);
-
-        if (fallbackResp.ok) {
-          success = true;
-          console.log('Acesso liberado via cliente!');
+        } catch (e) {
+          console.error(`Erro em ${ep.label}:`, e);
         }
       }
     } else {
