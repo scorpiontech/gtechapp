@@ -285,6 +285,11 @@ serve(async (req) => {
       // O campo 'name' do contrato geralmente é "Contrato do Cliente ID X", então preferimos 'description'
       // ou usar o nome do plano vinculado
       const contratoDescription = contrato.description?.trim();
+      // Usar contract.name como nome do plano (prioridade)
+      if (!planoNome && contrato.name) {
+        planoNome = contrato.name;
+        console.log('Using contract.name as plan name:', planoNome);
+      }
       planoNome = planoNome ?? contrato.plan?.name ?? contrato.plan_name ?? contrato.plan?.title ?? null;
       
       // Se description não está vazio e parece ser o nome do plano, usar
