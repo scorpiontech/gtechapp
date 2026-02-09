@@ -14,7 +14,7 @@ serve(async (req) => {
   }
 
   try {
-    const { cliente_id, contrato_id } = await req.json();
+    const { cliente_id } = await req.json();
 
     if (!cliente_id) {
       return new Response(
@@ -64,7 +64,7 @@ serve(async (req) => {
       'Content-Type': 'application/json',
     };
 
-    // 1. Buscar contrato completo com logins
+    // 1. Buscar contratos do cliente
     console.log(`Buscando contratos do cliente ${cliente_id}...`);
     const contractsResp = await fetch(
       `https://api.mikweb.com.br/v1/admin/customer_contracts?customer_id=${cliente_id}`,
@@ -72,6 +72,7 @@ serve(async (req) => {
     );
 
     if (!contractsResp.ok) {
+      console.error(`Erro ao buscar contratos: ${contractsResp.status}`);
       return new Response(
         JSON.stringify({ success: false, error: 'Erro ao acessar contrato.' }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -81,7 +82,7 @@ serve(async (req) => {
     const contractsData = await contractsResp.json();
     const contracts = contractsData.customer_contracts || contractsData.contracts || contractsData.data || [];
     const activeContract = contracts?.find((c: any) => c.status === 'active') || contracts?.[0];
-    
+
     if (!activeContract) {
       return new Response(
         JSON.stringify({ success: false, error: 'Nenhum contrato encontrado.' }),
@@ -90,123 +91,142 @@ serve(async (req) => {
     }
 
     const contractId = activeContract.id;
-    console.log(`Contrato: id=${contractId}, access_status=${activeContract.access_status}`);
+    console.log(`Contrato encontrado: id=${contractId}, access_status=${activeContract.access_status}`);
 
-    // 2. Buscar detalhes completos do contrato (inclui logins)
-    const detailResp = await fetch(
+    // 2. Tentar atualizar o contrato diretamente com PUT
+    // Enviar todos os campos obrigatórios do contrato + access_status alterado
+    const contractUpdateBody: any = {
+      access_status: 'access_activated',
+    };
+
+    // Copiar campos obrigatórios do contrato original
+    const requiredFields = [
+      'billing_address_zip_code', 'billing_address_street', 'billing_address_number',
+      'billing_address_complement', 'billing_address_neighborhood', 'billing_address_city',
+      'billing_address_state', 'billing_email', 'subscriber_type', 'repeat_every',
+      'repeat_on', 'contract_template_id', 'payment_account_id',
+      'subtotal', 'total', 'start_date', 'end_date',
+    ];
+
+    for (const field of requiredFields) {
+      if (activeContract[field] !== undefined && activeContract[field] !== null) {
+        contractUpdateBody[field] = activeContract[field];
+      }
+    }
+
+    console.log(`PUT /customer_contracts/${contractId}:`, JSON.stringify(contractUpdateBody));
+
+    const contractUpdateResp = await fetch(
       `https://api.mikweb.com.br/v1/admin/customer_contracts/${contractId}`,
-      { method: 'GET', headers: authHeaders }
+      {
+        method: 'PUT',
+        headers: authHeaders,
+        body: JSON.stringify(contractUpdateBody),
+      }
     );
 
-    if (!detailResp.ok) {
-      return new Response(
-        JSON.stringify({ success: false, error: 'Erro ao acessar detalhes do contrato.' }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
+    const contractUpdateText = await contractUpdateResp.text();
+    console.log(`PUT /customer_contracts/${contractId}: ${contractUpdateResp.status} - ${contractUpdateText.substring(0, 500)}`);
 
-    const detailData = await detailResp.json();
-    const contract = detailData.customer_contract || detailData;
-    const logins = contract.logins || [];
-    
-    console.log(`Logins encontrados: ${logins.length}`);
-    logins.forEach((l: any) => {
-      console.log(`Login: id=${l.id}, type=${l.login_type}, auth=${l.authentication_type}, login=${l.login}, access_status=${l.access_status}, plan_id=${l.plan_id}, server_id=${l.server_id}`);
-    });
+    let contractUpdated = false;
 
-    // 3. Atualizar cada login PPPoE para access_activated
-    let anyLoginUpdated = false;
-
-    for (const login of logins) {
-      // Focar em logins de internet (PPPoE)
-      if (login.login_type !== 'internet' && login.authentication_type !== 'pppoe') {
-        console.log(`Pulando login ${login.id} (tipo: ${login.login_type})`);
-        continue;
+    if (contractUpdateResp.ok) {
+      try {
+        const parsed = JSON.parse(contractUpdateText);
+        const updated = parsed.customer_contract || parsed;
+        console.log(`Novo access_status do contrato: ${updated.access_status}`);
+        if (updated.access_status === 'access_activated') {
+          contractUpdated = true;
+          console.log('Contrato atualizado com sucesso via PUT!');
+        } else {
+          console.log('PUT retornou 200 mas access_status não mudou');
+        }
+      } catch (e) {
+        console.log('PUT retornou 200, assumindo sucesso');
+        contractUpdated = true;
       }
-
-      if (login.access_status === 'access_activated') {
-        console.log(`Login ${login.id} já está ativado`);
-        anyLoginUpdated = true;
-        continue;
-      }
-
-      // Montar body com todos os campos do login para evitar erro de validação
-      const loginUpdateBody: any = {
-        access_status: 'access_activated',
-        login: login.login,
-        password: login.password,
-        plan_id: login.plan_id,
-        server_id: login.server_id,
-        contract_id: login.contract_id || contractId,
-        contract_item_id: login.contract_item_id,
-      };
-
-      // Incluir campos opcionais se existirem
-      if (login.ip) loginUpdateBody.ip = login.ip;
-      if (login.mac) loginUpdateBody.mac = login.mac;
-      if (login.longitude) loginUpdateBody.longitude = login.longitude;
-      if (login.latitude) loginUpdateBody.latitude = login.latitude;
-
-      console.log(`Atualizando login ${login.id}: PUT /logins/${login.id}`, JSON.stringify(loginUpdateBody));
+    } else {
+      console.error(`PUT /customer_contracts falhou: ${contractUpdateResp.status}`);
       
-      const updateResp = await fetch(
-        `https://api.mikweb.com.br/v1/admin/logins/${login.id}`,
+      // Fallback: tentar PATCH no contrato
+      console.log(`Tentando PATCH /customer_contracts/${contractId}`);
+      const patchResp = await fetch(
+        `https://api.mikweb.com.br/v1/admin/customer_contracts/${contractId}`,
         {
-          method: 'PUT',
+          method: 'PATCH',
           headers: authHeaders,
-          body: JSON.stringify(loginUpdateBody),
+          body: JSON.stringify({ access_status: 'access_activated' }),
         }
       );
-      const updateText = await updateResp.text();
-      console.log(`PUT /logins/${login.id}: ${updateResp.status} - ${updateText.substring(0, 400)}`);
+      const patchText = await patchResp.text();
+      console.log(`PATCH /customer_contracts/${contractId}: ${patchResp.status} - ${patchText.substring(0, 500)}`);
 
-      if (updateResp.ok) {
-        anyLoginUpdated = true;
-        console.log(`Login ${login.id} atualizado com sucesso!`);
+      if (patchResp.ok) {
+        contractUpdated = true;
+        console.log('Contrato atualizado via PATCH!');
+      }
+    }
+
+    // 3. Se contrato não atualizou, tentar via logins como fallback
+    if (!contractUpdated) {
+      console.log('Contrato não atualizado, tentando via logins...');
+      
+      const detailResp = await fetch(
+        `https://api.mikweb.com.br/v1/admin/customer_contracts/${contractId}`,
+        { method: 'GET', headers: authHeaders }
+      );
+
+      if (detailResp.ok) {
+        const detailData = await detailResp.json();
+        const contract = detailData.customer_contract || detailData;
+        const logins = contract.logins || [];
         
-        // Verificar se access_status mudou
-        try {
-          const data = JSON.parse(updateText);
-          const updatedLogin = data.login || data;
-          console.log(`Novo access_status do login: ${updatedLogin.access_status}`);
-        } catch(e) {}
-      } else {
-        console.error(`Falha ao atualizar login ${login.id}: ${updateResp.status}`);
-        
-        // Tentar PATCH como fallback
-        console.log(`Tentando PATCH /logins/${login.id}`);
-        const patchResp = await fetch(
-          `https://api.mikweb.com.br/v1/admin/logins/${login.id}`,
-          {
-            method: 'PATCH',
-            headers: authHeaders,
-            body: JSON.stringify({ access_status: 'access_activated' }),
+        console.log(`Logins encontrados: ${logins.length}`);
+
+        for (const login of logins) {
+          if (login.login_type !== 'internet' && login.authentication_type !== 'pppoe') {
+            continue;
           }
-        );
-        const patchText = await patchResp.text();
-        console.log(`PATCH /logins/${login.id}: ${patchResp.status} - ${patchText.substring(0, 400)}`);
-        
-        if (patchResp.ok) {
-          anyLoginUpdated = true;
-          console.log(`Login ${login.id} atualizado via PATCH!`);
+
+          const loginBody: any = {
+            access_status: 'access_activated',
+            login: login.login,
+            password: login.password,
+            plan_id: login.plan_id,
+            server_id: login.server_id,
+            contract_id: login.contract_id || contractId,
+            contract_item_id: login.contract_item_id,
+          };
+          if (login.ip) loginBody.ip = login.ip;
+          if (login.mac) loginBody.mac = login.mac;
+          if (login.longitude) loginBody.longitude = login.longitude;
+          if (login.latitude) loginBody.latitude = login.latitude;
+
+          console.log(`PUT /logins/${login.id}:`, JSON.stringify(loginBody));
+          const updateResp = await fetch(
+            `https://api.mikweb.com.br/v1/admin/logins/${login.id}`,
+            { method: 'PUT', headers: authHeaders, body: JSON.stringify(loginBody) }
+          );
+          const updateText = await updateResp.text();
+          console.log(`PUT /logins/${login.id}: ${updateResp.status} - ${updateText.substring(0, 400)}`);
+
+          if (updateResp.ok) {
+            contractUpdated = true;
+          }
         }
       }
     }
 
-    if (!anyLoginUpdated) {
-      console.error('Nenhum login foi atualizado');
+    if (!contractUpdated) {
       return new Response(
-        JSON.stringify({ 
-          success: false, 
-          error: 'Não foi possível liberar o acesso. Entre em contato com o suporte.',
-        }),
+        JSON.stringify({ success: false, error: 'Não foi possível liberar o acesso. Entre em contato com o suporte.' }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    // 4. Registrar uso
+    // Registrar uso
     await supabase.from('desbloqueio_logs').insert({ cliente_id: Number(cliente_id) });
-    console.log('Desbloqueio concluído com sucesso via login update');
+    console.log('Desbloqueio concluído com sucesso');
 
     return new Response(
       JSON.stringify({
