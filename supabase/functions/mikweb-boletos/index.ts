@@ -104,7 +104,7 @@ serve(async (req) => {
         data_pagamento: billing.date_payment || null,
         data_emissao: billing.created_at,
         status,
-        situation_id: situationId,
+        situation_id: Number(billing.situation_id),
         referencia: billing.reference || null,
         linha_digitavel: billing.digitable_line || billing.barcode_line || null,
         codigo_barras: billing.barcode || null,
