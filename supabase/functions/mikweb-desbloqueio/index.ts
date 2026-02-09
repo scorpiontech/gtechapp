@@ -129,7 +129,7 @@ serve(async (req) => {
     contractUpdateBody.access_status = 'access_activated';
 
     // Garantir campos obrigatórios que podem não vir no GET
-    if (!contractUpdateBody.financial_options_status) contractUpdateBody.financial_options_status = 'pending';
+    if (!contractUpdateBody.financial_options_status || !['default', 'enabled', 'disabled'].includes(contractUpdateBody.financial_options_status)) contractUpdateBody.financial_options_status = 'default';
     if (contractUpdateBody.discount_enabled === undefined) contractUpdateBody.discount_enabled = false;
     if (contractUpdateBody.addition_enabled === undefined) contractUpdateBody.addition_enabled = false;
     if (!contractUpdateBody.billing_type) contractUpdateBody.billing_type = 'postpaid';
