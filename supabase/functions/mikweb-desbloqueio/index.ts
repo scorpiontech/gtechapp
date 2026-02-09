@@ -224,14 +224,67 @@ serve(async (req) => {
       );
     }
 
-    // Atualizar o access_status do contrato para access_activated
-    console.log(`Liberando acesso: PUT /customer_contracts/${actualContractId}`);
+    // Buscar dados completos do contrato para enviar junto com a atualização
+    console.log(`Buscando dados completos do contrato ${actualContractId}...`);
+    const contractDetailResponse = await fetch(
+      `https://api.mikweb.com.br/v1/admin/customer_contracts/${actualContractId}`,
+      { method: 'GET', headers: authHeaders }
+    );
+
+    let contractUpdateBody: any = { access_status: 'access_activated' };
+
+    if (contractDetailResponse.ok) {
+      const contractDetail = await contractDetailResponse.json();
+      const contract = contractDetail.customer_contract || contractDetail;
+      console.log(`Contrato detalhes obtidos, campos: ${Object.keys(contract).join(', ')}`);
+
+      // Incluir campos obrigatórios que a API exige no PUT
+      contractUpdateBody = {
+        access_status: 'access_activated',
+        financial_options_status: contract.financial_options_status || 'default',
+        discount_enabled: contract.discount_enabled ?? false,
+        addition_enabled: contract.addition_enabled ?? false,
+        billing_address_zip_code: contract.billing_address_zip_code || contract.customer?.zip_code || '',
+        billing_address_street: contract.billing_address_street || contract.customer?.street || '',
+        billing_address_number: contract.billing_address_number || contract.customer?.number || '',
+        billing_address_complement: contract.billing_address_complement || contract.customer?.complement || '',
+        billing_address_neighborhood: contract.billing_address_neighborhood || contract.customer?.neighborhood || '',
+        billing_address_city: contract.billing_address_city || contract.customer?.city || '',
+        billing_address_state: contract.billing_address_state || contract.customer?.state || '',
+      };
+    } else {
+      console.warn(`Não foi possível buscar detalhes do contrato: ${contractDetailResponse.status}`);
+      // Buscar dados do cliente para preencher endereço
+      const customerResponse = await fetch(
+        `https://api.mikweb.com.br/v1/admin/customers/${cliente_id}`,
+        { method: 'GET', headers: authHeaders }
+      );
+      if (customerResponse.ok) {
+        const customerData = await customerResponse.json();
+        const cust = customerData.customer || customerData;
+        contractUpdateBody = {
+          access_status: 'access_activated',
+          financial_options_status: 'default',
+          discount_enabled: false,
+          addition_enabled: false,
+          billing_address_zip_code: cust.zip_code || '',
+          billing_address_street: cust.street || '',
+          billing_address_number: cust.number || '',
+          billing_address_complement: cust.complement || '',
+          billing_address_neighborhood: cust.neighborhood || '',
+          billing_address_city: cust.city || '',
+          billing_address_state: cust.state || '',
+        };
+      }
+    }
+
+    console.log(`Liberando acesso: PUT /customer_contracts/${actualContractId}`, JSON.stringify(contractUpdateBody));
     const desbloqueioResponse = await fetch(
       `https://api.mikweb.com.br/v1/admin/customer_contracts/${actualContractId}`,
       {
         method: 'PUT',
         headers: authHeaders,
-        body: JSON.stringify({ access_status: 'access_activated' }),
+        body: JSON.stringify(contractUpdateBody),
       }
     );
 
@@ -240,26 +293,10 @@ serve(async (req) => {
 
     if (!desbloqueioResponse.ok) {
       console.error('MikWeb desbloqueio contrato error:', desbloqueioResponse.status, desbloqueioText);
-      
-      // Fallback: tentar via customer endpoint
-      console.log(`Tentando fallback: PUT /customers/${cliente_id}`);
-      const fallbackResponse = await fetch(
-        `https://api.mikweb.com.br/v1/admin/customers/${cliente_id}`,
-        {
-          method: 'PUT',
-          headers: authHeaders,
-          body: JSON.stringify({ access_status: 'L' }),
-        }
+      return new Response(
+        JSON.stringify({ success: false, error: 'Não foi possível liberar o acesso. Entre em contato com o suporte. Erro: ' + desbloqueioResponse.status }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
-      const fallbackText = await fallbackResponse.text();
-      console.log(`Fallback customer: ${fallbackResponse.status} - ${fallbackText}`);
-
-      if (!fallbackResponse.ok) {
-        return new Response(
-          JSON.stringify({ success: false, error: 'Não foi possível liberar o acesso. Entre em contato com o suporte.' }),
-          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
     }
 
     console.log('Acesso liberado com sucesso');
