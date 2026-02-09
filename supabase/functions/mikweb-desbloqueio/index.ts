@@ -132,7 +132,7 @@ serve(async (req) => {
       }
     }
 
-    // 2. Tentar colocar boletos vencidos em observação (resiliência - não bloqueia se falhar)
+    // 2. Colocar boletos vencidos em observação via endpoint correto
     try {
       console.log(`Buscando boletos vencidos do cliente ${cliente_id}...`);
       const billingsResp = await fetch(
@@ -145,31 +145,33 @@ serve(async (req) => {
         const billings = billingsData.billings || billingsData.data || [];
         console.log(`Boletos vencidos encontrados: ${billings.length}`);
 
+        // lock_in = amanhã no formato dd-MM-yyyy
         const tomorrow = new Date();
         tomorrow.setDate(tomorrow.getDate() + 1);
-        const tomorrowStr = tomorrow.toISOString().split('T')[0];
+        const dd = String(tomorrow.getDate()).padStart(2, '0');
+        const mm = String(tomorrow.getMonth() + 1).padStart(2, '0');
+        const yyyy = tomorrow.getFullYear();
+        const lockIn = `${dd}-${mm}-${yyyy}`;
 
         for (const billing of billings) {
           try {
-            // Colocar em observação
             const obsResp = await fetch(
-              `https://api.mikweb.com.br/v1/admin/billings/${billing.id}/observation`,
-              { method: 'PUT', headers: authHeaders }
-            );
-            console.log(`PUT /billings/${billing.id}/observation: ${obsResp.status}`);
-
-            // Atualizar vencimento para amanhã
-            const updateResp = await fetch(
-              `https://api.mikweb.com.br/v1/admin/billings/${billing.id}`,
+              `https://api.mikweb.com.br/v1/admin/billings/${billing.id}/add_observation`,
               {
                 method: 'PUT',
                 headers: authHeaders,
-                body: JSON.stringify({ due_day: tomorrowStr }),
+                body: JSON.stringify({ lock_in: lockIn }),
               }
             );
-            console.log(`PUT /billings/${billing.id} (vencimento ${tomorrowStr}): ${updateResp.status}`);
+            const obsText = await obsResp.text();
+            console.log(`PUT /billings/${billing.id}/add_observation (lock_in=${lockIn}): ${obsResp.status} - ${obsText.substring(0, 300)}`);
+
+            if (obsResp.ok && !success) {
+              success = true;
+              console.log('Boleto colocado em observação - acesso deve ser liberado automaticamente');
+            }
           } catch (billingErr) {
-            console.error(`Erro ao atualizar boleto ${billing.id}:`, billingErr);
+            console.error(`Erro ao colocar boleto ${billing.id} em observação:`, billingErr);
           }
         }
       }
