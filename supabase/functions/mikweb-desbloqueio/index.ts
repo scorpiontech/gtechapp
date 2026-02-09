@@ -128,6 +128,12 @@ serve(async (req) => {
     // Sobrescrever o access_status
     contractUpdateBody.access_status = 'access_activated';
 
+    // Garantir campos obrigatórios que podem não vir no GET
+    if (!contractUpdateBody.financial_options_status) contractUpdateBody.financial_options_status = 'pending';
+    if (contractUpdateBody.discount_enabled === undefined) contractUpdateBody.discount_enabled = false;
+    if (contractUpdateBody.addition_enabled === undefined) contractUpdateBody.addition_enabled = false;
+    if (!contractUpdateBody.billing_type) contractUpdateBody.billing_type = 'postpaid';
+
     console.log(`PUT /customer_contracts/${contractId} - campos:`, Object.keys(contractUpdateBody).join(', '));
 
     const contractUpdateResp = await fetch(
