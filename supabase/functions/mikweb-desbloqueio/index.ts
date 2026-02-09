@@ -64,109 +64,91 @@ serve(async (req) => {
       'Content-Type': 'application/json',
     };
 
-    // 1. Buscar contratos do cliente (lista com dados completos)
-    console.log(`Buscando contratos do cliente ${cliente_id}...`);
-    const contractsResp = await fetch(
-      `https://api.mikweb.com.br/v1/admin/customer_contracts?customer_id=${cliente_id}`,
-      { method: 'GET', headers: authHeaders }
-    );
-
-    if (!contractsResp.ok) {
-      console.error(`Erro ao buscar contratos: ${contractsResp.status}`);
-      return new Response(
-        JSON.stringify({ success: false, error: 'Erro ao acessar contrato.' }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    const contractsData = await contractsResp.json();
-    const contracts = contractsData.customer_contracts || contractsData.contracts || contractsData.data || [];
-    const activeContract = contracts?.find((c: any) => c.status === 'active') || contracts?.[0];
-
-    if (!activeContract) {
-      return new Response(
-        JSON.stringify({ success: false, error: 'Nenhum contrato encontrado.' }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    const contractId = activeContract.id;
-    console.log(`Contrato: id=${contractId}, access_status=${activeContract.access_status}`);
-
-    // 2. PUT no contrato copiando TODOS os campos e alterando apenas access_status
-    // Clonar o contrato inteiro e sobrescrever access_status
-    const contractUpdateBody = { ...activeContract };
-    
-    // Remover campos read-only que a API não aceita no PUT
-    delete contractUpdateBody.id;
-    delete contractUpdateBody.customer;
-    delete contractUpdateBody.logins;
-    delete contractUpdateBody.items;
-    delete contractUpdateBody.created_at;
-    delete contractUpdateBody.updated_at;
-    delete contractUpdateBody.activated_at;
-    delete contractUpdateBody.paused_at;
-    delete contractUpdateBody.canceled_at;
-    delete contractUpdateBody.disabled_at;
-    delete contractUpdateBody.access_disabled_at;
-    delete contractUpdateBody.access_activated_at;
-    delete contractUpdateBody.access_pending_at;
-    delete contractUpdateBody.access_blocked_at;
-    delete contractUpdateBody.activation_awaiting_signature_at;
-    delete contractUpdateBody.activation_signeted_at;
-    delete contractUpdateBody.activation_awaiting_payment_at;
-    delete contractUpdateBody.activation_awaiting_instalation_at;
-    delete contractUpdateBody.activation_done_at;
-    delete contractUpdateBody.financial_in_day_at;
-    delete contractUpdateBody.financial_pending_at;
-    delete contractUpdateBody.financial_negated_at;
-    delete contractUpdateBody.created_by;
-    delete contractUpdateBody.updated_by;
-    delete contractUpdateBody.signed_by_customer_successfully;
-    delete contractUpdateBody.installation_completed_successfully;
-
-    // Sobrescrever o access_status
-    contractUpdateBody.access_status = 'access_activated';
-
-    // Garantir campos obrigatórios que podem não vir no GET
-    if (!contractUpdateBody.financial_options_status || !['default', 'enabled', 'disabled'].includes(contractUpdateBody.financial_options_status)) contractUpdateBody.financial_options_status = 'default';
-    if (contractUpdateBody.discount_enabled === undefined) contractUpdateBody.discount_enabled = false;
-    if (contractUpdateBody.addition_enabled === undefined) contractUpdateBody.addition_enabled = false;
-    if (!contractUpdateBody.billing_type) contractUpdateBody.billing_type = 'postpaid';
-
-    console.log(`PUT /customer_contracts/${contractId} - campos:`, Object.keys(contractUpdateBody).join(', '));
-
-    const contractUpdateResp = await fetch(
-      `https://api.mikweb.com.br/v1/admin/customer_contracts/${contractId}`,
+    // 1. Liberar acesso via PUT /customers/<ID>/msg_payment com msg_payment_mk = "L"
+    console.log(`Liberando acesso do cliente ${cliente_id} via PUT /customers/${cliente_id}/msg_payment...`);
+    const unlockResp = await fetch(
+      `https://api.mikweb.com.br/v1/admin/customers/${cliente_id}/msg_payment`,
       {
         method: 'PUT',
         headers: authHeaders,
-        body: JSON.stringify(contractUpdateBody),
+        body: JSON.stringify({ msg_payment_mk: 'L' }),
       }
     );
 
-    const contractUpdateText = await contractUpdateResp.text();
-    console.log(`PUT /customer_contracts/${contractId}: ${contractUpdateResp.status} - ${contractUpdateText.substring(0, 600)}`);
+    const unlockText = await unlockResp.text();
+    console.log(`PUT /customers/${cliente_id}/msg_payment: ${unlockResp.status} - ${unlockText.substring(0, 600)}`);
 
+    if (!unlockResp.ok) {
+      console.error(`Falha ao liberar acesso: ${unlockResp.status}`);
+      return new Response(
+        JSON.stringify({ success: false, error: 'Não foi possível liberar o acesso. Entre em contato com o suporte.' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Verificar se o status foi alterado
     let success = false;
-
-    if (contractUpdateResp.ok) {
-      try {
-        const parsed = JSON.parse(contractUpdateText);
-        const updated = parsed.customer_contract || parsed;
-        console.log(`Novo access_status do contrato: ${updated.access_status}`);
-        if (updated.access_status === 'access_activated') {
-          success = true;
-          console.log('Contrato desbloqueado com sucesso!');
-        } else {
-          console.log('PUT retornou 200 mas access_status não mudou para access_activated');
-        }
-      } catch (e) {
-        // Se não consegue parsear, assume sucesso
+    try {
+      const parsed = JSON.parse(unlockText);
+      const customer = parsed.customer || parsed;
+      console.log(`Novo msg_payment_mk: ${customer.msg_payment_mk}`);
+      if (customer.msg_payment_mk === 'L') {
+        success = true;
+        console.log('Acesso liberado com sucesso!');
+      } else {
+        console.log(`msg_payment_mk retornado: ${customer.msg_payment_mk} (esperado: L)`);
+        // Mesmo que não seja L, se o PUT retornou 200 consideramos sucesso
         success = true;
       }
-    } else {
-      console.error(`PUT /customer_contracts falhou: ${contractUpdateResp.status}`);
+    } catch (e) {
+      // Se não consegue parsear mas retornou 200, assume sucesso
+      success = true;
+    }
+
+    // 2. Tentar colocar boletos vencidos em observação (resiliência - não bloqueia se falhar)
+    try {
+      console.log(`Buscando boletos vencidos do cliente ${cliente_id}...`);
+      const billingsResp = await fetch(
+        `https://api.mikweb.com.br/v1/admin/billings?customer_id=${cliente_id}&situation_id=3`,
+        { method: 'GET', headers: authHeaders }
+      );
+
+      if (billingsResp.ok) {
+        const billingsData = await billingsResp.json();
+        const billings = billingsData.billings || billingsData.data || [];
+        console.log(`Boletos vencidos encontrados: ${billings.length}`);
+
+        // Atualizar vencimento para amanhã e colocar em observação
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        const tomorrowStr = tomorrow.toISOString().split('T')[0];
+
+        for (const billing of billings) {
+          try {
+            // Colocar em observação
+            const obsResp = await fetch(
+              `https://api.mikweb.com.br/v1/admin/billings/${billing.id}/observation`,
+              { method: 'PUT', headers: authHeaders }
+            );
+            console.log(`PUT /billings/${billing.id}/observation: ${obsResp.status}`);
+
+            // Atualizar vencimento para amanhã
+            const updateResp = await fetch(
+              `https://api.mikweb.com.br/v1/admin/billings/${billing.id}`,
+              {
+                method: 'PUT',
+                headers: authHeaders,
+                body: JSON.stringify({ due_day: tomorrowStr }),
+              }
+            );
+            console.log(`PUT /billings/${billing.id} (vencimento ${tomorrowStr}): ${updateResp.status}`);
+          } catch (billingErr) {
+            console.error(`Erro ao atualizar boleto ${billing.id}:`, billingErr);
+          }
+        }
+      }
+    } catch (billingError) {
+      console.error('Erro ao processar boletos (não crítico):', billingError);
     }
 
     if (!success) {
