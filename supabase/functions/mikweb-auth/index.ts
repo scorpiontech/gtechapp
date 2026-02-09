@@ -129,6 +129,7 @@ serve(async (req) => {
             valor_plano: null,
             vencimento: cliente.due_day,
             bloqueado: cliente.financial_status === 'B' || cliente.status === 'Bloqueado',
+            access_status: cliente.access_status || cliente.financial_status || null,
             servidor: cliente.server?.name,
             contrato_id: cliente.customer_contract_ids?.[0] || null,
           }
@@ -530,6 +531,7 @@ serve(async (req) => {
           valor_plano: valorPlano,
           vencimento: vencimento,
           bloqueado: isBloqueado,
+          access_status: cliente.access_status || cliente.financial_status || null,
           servidor: cliente.server?.name,
           contrato_id: contratoId || null,
         },
