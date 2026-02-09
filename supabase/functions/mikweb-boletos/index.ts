@@ -47,24 +47,35 @@ serve(async (req) => {
     const data = await response.json();
     const titulos = data.billings || data.data || [];
 
-    // Log first billing fields for debugging
+    // Log billing fields and all distinct situations for debugging
     if (Array.isArray(titulos) && titulos.length > 0) {
       console.log('Billing fields:', Object.keys(titulos[0]).join(', '));
+      // Log all distinct situation_id + situation_name combos
+      const situations = [...new Set(titulos.map((b: any) => `${b.situation_id}:${b.situation_name || b.situation?.name || 'unknown'}`))];
+      console.log('All situations:', situations.join(', '));
       const b = titulos[0];
       console.log('Sample billing:', JSON.stringify({
-        id: b.id, situation_id: b.situation_id, due_day: b.due_day,
+        id: b.id, situation_id: b.situation_id, situation_name: b.situation_name,
+        situation: b.situation, due_day: b.due_day,
         value: b.value, value_paid: b.value_paid, date_payment: b.date_payment,
-        digitable_line: b.digitable_line?.substring(0, 30),
-        pix_qr_code: b.pix_qr_code?.substring(0, 30),
-        pix_copy_paste: b.pix_copy_paste?.substring(0, 30),
-        billing_url: b.billing_url?.substring(0, 50),
-        barcode: b.barcode?.substring(0, 30),
       }));
     }
 
-    // MikWeb situation_id mapping:
-    // 1 = Aberto, 2 = Atrasado, 3 = Pago, 4 = Cancelado, 5 = Remessa
-    const situationMap: Record<number, string> = {
+    // MikWeb situation_name mapping (based on user report):
+    // "efetuado" = pago, "em aberto" = aberto, "em atraso" = vencido, "em observação" = aberto
+    // Also map by situation_id as fallback
+    const situationNameMap: Record<string, string> = {
+      'efetuado': 'pago',
+      'em aberto': 'aberto',
+      'em atraso': 'vencido',
+      'atrasado': 'vencido',
+      'cancelado': 'cancelado',
+      'em observação': 'aberto',
+      'observação': 'aberto',
+      'remessa': 'aberto',
+    };
+
+    const situationIdMap: Record<number, string> = {
       1: 'aberto',
       2: 'vencido',
       3: 'pago',
@@ -72,9 +83,17 @@ serve(async (req) => {
       5: 'aberto',
     };
 
+    const resolveStatus = (billing: any): string => {
+      // Try situation_name first (most reliable based on MikWeb UI)
+      const name = (billing.situation_name || billing.situation?.name || '').toLowerCase().trim();
+      if (name && situationNameMap[name]) return situationNameMap[name];
+      // Fallback to situation_id
+      const id = Number(billing.situation_id);
+      return situationIdMap[id] || 'aberto';
+    };
+
     const boletos = Array.isArray(titulos) ? titulos.map((billing: any) => {
-      const situationId = Number(billing.situation_id);
-      const status = situationMap[situationId] || 'aberto';
+      const status = resolveStatus(billing);
 
       return {
         id: billing.id,
