@@ -153,15 +153,23 @@ serve(async (req) => {
         });
         console.log(`Boletos vencidos encontrados: ${billings.length} (de ${allBillings.length} total)`);
 
-        // lock_in = amanhã no formato dd-MM-yyyy
-        const tomorrow = new Date();
-        tomorrow.setDate(tomorrow.getDate() + 1);
-        const dd = String(tomorrow.getDate()).padStart(2, '0');
-        const mm = String(tomorrow.getMonth() + 1).padStart(2, '0');
-        const yyyy = tomorrow.getFullYear();
-        const lockIn = `${dd}-${mm}-${yyyy}`;
+        // Ordenar por vencimento decrescente e pegar apenas o mais recente
+        billings.sort((a: any, b: any) => {
+          const dateA = new Date(a.due_day || a.vencimento);
+          const dateB = new Date(b.due_day || b.vencimento);
+          return dateB.getTime() - dateA.getTime();
+        });
+        const latestBilling = billings[0];
 
-        for (const billing of billings) {
+        if (latestBilling) {
+          // lock_in = amanhã no formato dd-MM-yyyy
+          const tomorrow = new Date();
+          tomorrow.setDate(tomorrow.getDate() + 1);
+          const dd = String(tomorrow.getDate()).padStart(2, '0');
+          const mm = String(tomorrow.getMonth() + 1).padStart(2, '0');
+          const yyyy = tomorrow.getFullYear();
+          const lockIn = `${dd}-${mm}-${yyyy}`;
+          const billing = latestBilling;
           try {
             const obsResp = await fetch(
               `https://api.mikweb.com.br/v1/admin/billings/${billing.id}/add_observation`,
@@ -176,7 +184,7 @@ serve(async (req) => {
 
             if (obsResp.ok && !success) {
               success = true;
-              console.log('Boleto colocado em observação - acesso deve ser liberado automaticamente');
+              console.log('Boleto mais recente colocado em observação - acesso deve ser liberado automaticamente');
             }
           } catch (billingErr) {
             console.error(`Erro ao colocar boleto ${billing.id} em observação:`, billingErr);
