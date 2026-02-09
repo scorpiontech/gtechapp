@@ -64,7 +64,7 @@ serve(async (req) => {
       'Content-Type': 'application/json',
     };
 
-    // 1. Buscar contratos do cliente
+    // 1. Buscar contratos do cliente (lista com dados completos)
     console.log(`Buscando contratos do cliente ${cliente_id}...`);
     const contractsResp = await fetch(
       `https://api.mikweb.com.br/v1/admin/customer_contracts?customer_id=${cliente_id}`,
@@ -91,30 +91,44 @@ serve(async (req) => {
     }
 
     const contractId = activeContract.id;
-    console.log(`Contrato encontrado: id=${contractId}, access_status=${activeContract.access_status}`);
+    console.log(`Contrato: id=${contractId}, access_status=${activeContract.access_status}`);
 
-    // 2. Tentar atualizar o contrato diretamente com PUT
-    // Enviar todos os campos obrigatórios do contrato + access_status alterado
-    const contractUpdateBody: any = {
-      access_status: 'access_activated',
-    };
+    // 2. PUT no contrato copiando TODOS os campos e alterando apenas access_status
+    // Clonar o contrato inteiro e sobrescrever access_status
+    const contractUpdateBody = { ...activeContract };
+    
+    // Remover campos read-only que a API não aceita no PUT
+    delete contractUpdateBody.id;
+    delete contractUpdateBody.customer;
+    delete contractUpdateBody.logins;
+    delete contractUpdateBody.items;
+    delete contractUpdateBody.created_at;
+    delete contractUpdateBody.updated_at;
+    delete contractUpdateBody.activated_at;
+    delete contractUpdateBody.paused_at;
+    delete contractUpdateBody.canceled_at;
+    delete contractUpdateBody.disabled_at;
+    delete contractUpdateBody.access_disabled_at;
+    delete contractUpdateBody.access_activated_at;
+    delete contractUpdateBody.access_pending_at;
+    delete contractUpdateBody.access_blocked_at;
+    delete contractUpdateBody.activation_awaiting_signature_at;
+    delete contractUpdateBody.activation_signeted_at;
+    delete contractUpdateBody.activation_awaiting_payment_at;
+    delete contractUpdateBody.activation_awaiting_instalation_at;
+    delete contractUpdateBody.activation_done_at;
+    delete contractUpdateBody.financial_in_day_at;
+    delete contractUpdateBody.financial_pending_at;
+    delete contractUpdateBody.financial_negated_at;
+    delete contractUpdateBody.created_by;
+    delete contractUpdateBody.updated_by;
+    delete contractUpdateBody.signed_by_customer_successfully;
+    delete contractUpdateBody.installation_completed_successfully;
 
-    // Copiar campos obrigatórios do contrato original
-    const requiredFields = [
-      'billing_address_zip_code', 'billing_address_street', 'billing_address_number',
-      'billing_address_complement', 'billing_address_neighborhood', 'billing_address_city',
-      'billing_address_state', 'billing_email', 'subscriber_type', 'repeat_every',
-      'repeat_on', 'contract_template_id', 'payment_account_id',
-      'subtotal', 'total', 'start_date', 'end_date',
-    ];
+    // Sobrescrever o access_status
+    contractUpdateBody.access_status = 'access_activated';
 
-    for (const field of requiredFields) {
-      if (activeContract[field] !== undefined && activeContract[field] !== null) {
-        contractUpdateBody[field] = activeContract[field];
-      }
-    }
-
-    console.log(`PUT /customer_contracts/${contractId}:`, JSON.stringify(contractUpdateBody));
+    console.log(`PUT /customer_contracts/${contractId} - campos:`, Object.keys(contractUpdateBody).join(', '));
 
     const contractUpdateResp = await fetch(
       `https://api.mikweb.com.br/v1/admin/customer_contracts/${contractId}`,
@@ -126,9 +140,9 @@ serve(async (req) => {
     );
 
     const contractUpdateText = await contractUpdateResp.text();
-    console.log(`PUT /customer_contracts/${contractId}: ${contractUpdateResp.status} - ${contractUpdateText.substring(0, 500)}`);
+    console.log(`PUT /customer_contracts/${contractId}: ${contractUpdateResp.status} - ${contractUpdateText.substring(0, 600)}`);
 
-    let contractUpdated = false;
+    let success = false;
 
     if (contractUpdateResp.ok) {
       try {
@@ -136,88 +150,20 @@ serve(async (req) => {
         const updated = parsed.customer_contract || parsed;
         console.log(`Novo access_status do contrato: ${updated.access_status}`);
         if (updated.access_status === 'access_activated') {
-          contractUpdated = true;
-          console.log('Contrato atualizado com sucesso via PUT!');
+          success = true;
+          console.log('Contrato desbloqueado com sucesso!');
         } else {
-          console.log('PUT retornou 200 mas access_status não mudou');
+          console.log('PUT retornou 200 mas access_status não mudou para access_activated');
         }
       } catch (e) {
-        console.log('PUT retornou 200, assumindo sucesso');
-        contractUpdated = true;
+        // Se não consegue parsear, assume sucesso
+        success = true;
       }
     } else {
       console.error(`PUT /customer_contracts falhou: ${contractUpdateResp.status}`);
-      
-      // Fallback: tentar PATCH no contrato
-      console.log(`Tentando PATCH /customer_contracts/${contractId}`);
-      const patchResp = await fetch(
-        `https://api.mikweb.com.br/v1/admin/customer_contracts/${contractId}`,
-        {
-          method: 'PATCH',
-          headers: authHeaders,
-          body: JSON.stringify({ access_status: 'access_activated' }),
-        }
-      );
-      const patchText = await patchResp.text();
-      console.log(`PATCH /customer_contracts/${contractId}: ${patchResp.status} - ${patchText.substring(0, 500)}`);
-
-      if (patchResp.ok) {
-        contractUpdated = true;
-        console.log('Contrato atualizado via PATCH!');
-      }
     }
 
-    // 3. Se contrato não atualizou, tentar via logins como fallback
-    if (!contractUpdated) {
-      console.log('Contrato não atualizado, tentando via logins...');
-      
-      const detailResp = await fetch(
-        `https://api.mikweb.com.br/v1/admin/customer_contracts/${contractId}`,
-        { method: 'GET', headers: authHeaders }
-      );
-
-      if (detailResp.ok) {
-        const detailData = await detailResp.json();
-        const contract = detailData.customer_contract || detailData;
-        const logins = contract.logins || [];
-        
-        console.log(`Logins encontrados: ${logins.length}`);
-
-        for (const login of logins) {
-          if (login.login_type !== 'internet' && login.authentication_type !== 'pppoe') {
-            continue;
-          }
-
-          const loginBody: any = {
-            access_status: 'access_activated',
-            login: login.login,
-            password: login.password,
-            plan_id: login.plan_id,
-            server_id: login.server_id,
-            contract_id: login.contract_id || contractId,
-            contract_item_id: login.contract_item_id,
-          };
-          if (login.ip) loginBody.ip = login.ip;
-          if (login.mac) loginBody.mac = login.mac;
-          if (login.longitude) loginBody.longitude = login.longitude;
-          if (login.latitude) loginBody.latitude = login.latitude;
-
-          console.log(`PUT /logins/${login.id}:`, JSON.stringify(loginBody));
-          const updateResp = await fetch(
-            `https://api.mikweb.com.br/v1/admin/logins/${login.id}`,
-            { method: 'PUT', headers: authHeaders, body: JSON.stringify(loginBody) }
-          );
-          const updateText = await updateResp.text();
-          console.log(`PUT /logins/${login.id}: ${updateResp.status} - ${updateText.substring(0, 400)}`);
-
-          if (updateResp.ok) {
-            contractUpdated = true;
-          }
-        }
-      }
-    }
-
-    if (!contractUpdated) {
+    if (!success) {
       return new Response(
         JSON.stringify({ success: false, error: 'Não foi possível liberar o acesso. Entre em contato com o suporte.' }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
