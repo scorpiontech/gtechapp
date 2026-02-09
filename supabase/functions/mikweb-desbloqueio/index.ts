@@ -14,7 +14,7 @@ serve(async (req) => {
   }
 
   try {
-    const { cliente_id } = await req.json();
+    const { cliente_id, contrato_id } = await req.json();
 
     if (!cliente_id) {
       return new Response(
@@ -186,24 +186,80 @@ serve(async (req) => {
       console.warn('Some billing updates failed (proceeding with access unlock):', JSON.stringify(updateResults.filter((r) => !r.success)));
     }
 
-    // 5. Liberar acesso via PUT no customer
-    console.log(`Liberando acesso: PUT /customers/${cliente_id}`);
+    // 5. Liberar acesso via PUT no contrato do cliente
+    // Primeiro, buscar o ID correto do contrato
+    let actualContractId: number | null = null;
+
+    // Tentar buscar contratos do cliente para encontrar o ID correto
+    console.log(`Buscando contratos do cliente ${cliente_id}...`);
+    const contractsResponse = await fetch(
+      `https://api.mikweb.com.br/v1/admin/customer_contracts?customer_id=${cliente_id}`,
+      { method: 'GET', headers: authHeaders }
+    );
+
+    if (contractsResponse.ok) {
+      const contractsData = await contractsResponse.json();
+      const contracts = contractsData.customer_contracts || contractsData.contracts || contractsData.data || [];
+      if (Array.isArray(contracts) && contracts.length > 0) {
+        // Usar o primeiro contrato ativo
+        const activeContract = contracts.find((c: any) => c.status === 'active') || contracts[0];
+        actualContractId = activeContract.id;
+        console.log(`Contrato encontrado: id=${actualContractId}, status=${activeContract.status}, access_status=${activeContract.access_status}`);
+      }
+    } else {
+      console.error('Erro ao buscar contratos:', contractsResponse.status);
+    }
+
+    // Fallback: usar o contrato_id enviado pelo frontend
+    if (!actualContractId && contrato_id) {
+      actualContractId = contrato_id;
+      console.log(`Usando contrato_id do frontend: ${actualContractId}`);
+    }
+
+    if (!actualContractId) {
+      console.error('Nenhum contrato encontrado para o cliente');
+      return new Response(
+        JSON.stringify({ success: false, error: 'Não foi possível encontrar o contrato do cliente. Entre em contato com o suporte.' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Atualizar o access_status do contrato para access_activated
+    console.log(`Liberando acesso: PUT /customer_contracts/${actualContractId}`);
     const desbloqueioResponse = await fetch(
-      `https://api.mikweb.com.br/v1/admin/customers/${cliente_id}`,
+      `https://api.mikweb.com.br/v1/admin/customer_contracts/${actualContractId}`,
       {
         method: 'PUT',
         headers: authHeaders,
-        body: JSON.stringify({ access_status: 'L' }),
+        body: JSON.stringify({ access_status: 'access_activated' }),
       }
     );
 
+    const desbloqueioText = await desbloqueioResponse.text();
+    console.log(`Resposta desbloqueio contrato: ${desbloqueioResponse.status} - ${desbloqueioText}`);
+
     if (!desbloqueioResponse.ok) {
-      const errorText = await desbloqueioResponse.text();
-      console.error('MikWeb desbloqueio error:', desbloqueioResponse.status, errorText);
-      return new Response(
-        JSON.stringify({ success: false, error: 'Boletos atualizados, mas não foi possível liberar o acesso. Entre em contato com o suporte.' }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      console.error('MikWeb desbloqueio contrato error:', desbloqueioResponse.status, desbloqueioText);
+      
+      // Fallback: tentar via customer endpoint
+      console.log(`Tentando fallback: PUT /customers/${cliente_id}`);
+      const fallbackResponse = await fetch(
+        `https://api.mikweb.com.br/v1/admin/customers/${cliente_id}`,
+        {
+          method: 'PUT',
+          headers: authHeaders,
+          body: JSON.stringify({ access_status: 'L' }),
+        }
       );
+      const fallbackText = await fallbackResponse.text();
+      console.log(`Fallback customer: ${fallbackResponse.status} - ${fallbackText}`);
+
+      if (!fallbackResponse.ok) {
+        return new Response(
+          JSON.stringify({ success: false, error: 'Não foi possível liberar o acesso. Entre em contato com o suporte.' }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
     }
 
     console.log('Acesso liberado com sucesso');
