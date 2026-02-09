@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
-import { Copy, ExternalLink, Loader2, AlertCircle, Receipt, QrCode, Barcode, CheckCircle2, Calendar } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Copy, ExternalLink, Loader2, AlertCircle, Receipt, QrCode, Barcode, CheckCircle2, Calendar, Filter } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { AppLayout } from '@/components/AppLayout';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { StatusBadge } from '@/components/StatusBadge';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
@@ -31,6 +32,12 @@ const Boletos: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [statusFilter, setStatusFilter] = useState<string>('todos');
+
+  const filteredBoletos = useMemo(() => {
+    if (statusFilter === 'todos') return boletos;
+    return boletos.filter((b) => b.status === statusFilter);
+  }, [boletos, statusFilter]);
 
   useEffect(() => {
     const fetchBoletos = async () => {
@@ -68,6 +75,29 @@ const Boletos: React.FC = () => {
   return (
     <AppLayout title="Boletos" showBack>
       <div className="p-4 space-y-4">
+        {/* Filtro por status */}
+        {!loading && !error && boletos.length > 0 && (
+          <div className="flex items-center gap-2">
+            <Filter className="h-4 w-4 text-muted-foreground" />
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="w-[160px]">
+                <SelectValue placeholder="Filtrar status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="todos">Todos</SelectItem>
+                <SelectItem value="aberto">Aberto</SelectItem>
+                <SelectItem value="vencido">Vencido</SelectItem>
+                <SelectItem value="pago">Pago</SelectItem>
+                <SelectItem value="cancelado">Cancelado</SelectItem>
+              </SelectContent>
+            </Select>
+            {statusFilter !== 'todos' && (
+              <span className="text-xs text-muted-foreground">
+                {filteredBoletos.length} de {boletos.length}
+              </span>
+            )}
+          </div>
+        )}
         {loading && (
           <div className="flex flex-col items-center justify-center py-12 gap-4">
             <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -106,7 +136,17 @@ const Boletos: React.FC = () => {
 
         {!loading && !error && boletos.length > 0 && (
           <div className="space-y-3">
-            {boletos.map((boleto) => {
+            {filteredBoletos.length === 0 ? (
+              <Card>
+                <CardContent className="p-6 flex flex-col items-center gap-4 text-center">
+                  <Receipt className="h-10 w-10 text-muted-foreground" />
+                  <p className="text-sm text-muted-foreground">
+                    Nenhum boleto com status "{statusFilter}".
+                  </p>
+                </CardContent>
+              </Card>
+            ) : (
+            filteredBoletos.map((boleto) => {
               const isPago = boleto.status === 'pago';
               const isCancelado = boleto.status === 'cancelado';
               const isExpanded = expandedId === boleto.id;
@@ -240,7 +280,8 @@ const Boletos: React.FC = () => {
                   </CardContent>
                 </Card>
               );
-            })}
+            })
+            )}
           </div>
         )}
       </div>
