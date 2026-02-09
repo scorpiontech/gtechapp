@@ -6,6 +6,17 @@ import { AppLayout } from '@/components/AppLayout';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
 
 type DesbloqueioStatus = 'idle' | 'loading' | 'success' | 'error';
 
@@ -25,7 +36,7 @@ const Desbloqueio: React.FC = () => {
 
     try {
       const { data, error } = await supabase.functions.invoke('mikweb-desbloqueio', {
-        body: { cliente_id: cliente.id, conexao_id: cliente.conexao_id },
+        body: { cliente_id: cliente.id },
       });
 
       if (error) throw error;
@@ -91,7 +102,7 @@ const Desbloqueio: React.FC = () => {
             </CardTitle>
             <CardDescription>
               {isBloqueado 
-                ? 'Sua conexão está bloqueada. Clique abaixo para solicitar o desbloqueio temporário.'
+                ? 'Sua conexão está bloqueada. Ao solicitar o desbloqueio, o boleto vencido será ajustado para o dia seguinte e sua conexão será liberada.'
                 : 'Sua conexão está ativa. Não é necessário realizar desbloqueio.'}
             </CardDescription>
           </CardHeader>
@@ -99,13 +110,28 @@ const Desbloqueio: React.FC = () => {
             {status === 'idle' && (
               <>
                 {isBloqueado ? (
-                  <Button 
-                    onClick={handleDesbloqueio} 
-                    className="w-full h-12 text-base"
-                  >
-                    <Unlock className="h-5 w-5 mr-2" />
-                    Solicitar Desbloqueio
-                  </Button>
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button className="w-full h-12 text-base">
+                        <Unlock className="h-5 w-5 mr-2" />
+                        Solicitar Desbloqueio
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Confirmar Autodesbloqueio</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          Ao confirmar, o boleto vencido terá seu vencimento alterado para amanhã e a situação será ajustada para "em observação". Sua conexão será liberada automaticamente.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                        <AlertDialogAction onClick={handleDesbloqueio}>
+                          Confirmar Desbloqueio
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
                 ) : (
                   <div className="flex items-center justify-center gap-2 py-4 text-success">
                     <CheckCircle className="h-5 w-5" />
@@ -150,9 +176,25 @@ const Desbloqueio: React.FC = () => {
                   <Button variant="outline" onClick={resetStatus}>
                     Voltar
                   </Button>
-                  <Button onClick={handleDesbloqueio}>
-                    Tentar novamente
-                  </Button>
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button>Tentar novamente</Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Confirmar Autodesbloqueio</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          Ao confirmar, o boleto vencido terá seu vencimento alterado para amanhã e a situação será ajustada para "em observação". Sua conexão será liberada automaticamente.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                        <AlertDialogAction onClick={handleDesbloqueio}>
+                          Confirmar Desbloqueio
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
                 </div>
               </div>
             )}
@@ -166,8 +208,8 @@ const Desbloqueio: React.FC = () => {
             <div className="text-sm">
               <p className="font-medium text-warning-foreground">Importante</p>
               <p className="text-muted-foreground mt-1">
-                O autodesbloqueio é temporário e será revertido caso existam pendências financeiras. 
-                Para regularização definitiva, entre em contato com o suporte.
+                O autodesbloqueio é temporário. O boleto vencido será ajustado com vencimento para o dia seguinte. 
+                Caso não seja pago, a conexão poderá ser bloqueada novamente.
               </p>
             </div>
           </CardContent>
