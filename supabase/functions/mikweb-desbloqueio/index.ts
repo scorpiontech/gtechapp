@@ -1,9 +1,12 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
+
+const MAX_PER_MONTH = 1;
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -21,11 +24,45 @@ serve(async (req) => {
     }
 
     const apiToken = Deno.env.get('MIKWEB_API_TOKEN');
-    if (!apiToken) {
-      console.error('MIKWEB_API_TOKEN not configured');
+    const supabaseUrl = Deno.env.get('SUPABASE_URL');
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+
+    if (!apiToken || !supabaseUrl || !supabaseKey) {
+      console.error('Missing env vars');
       return new Response(
         JSON.stringify({ success: false, error: 'Configuração do servidor incompleta' }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
+      );
+    }
+
+    const supabase = createClient(supabaseUrl, supabaseKey);
+
+    // 0. Verificar limite de uso (máx 1 vez por mês)
+    const now = new Date();
+    const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+
+    const { data: logs, error: logError } = await supabase
+      .from('desbloqueio_logs')
+      .select('id, created_at')
+      .eq('cliente_id', cliente_id)
+      .gte('created_at', firstOfMonth)
+      .order('created_at', { ascending: false });
+
+    if (logError) {
+      console.error('Error checking logs:', logError);
+    }
+
+    const usageCount = logs?.length || 0;
+    console.log(`Cliente ${cliente_id} - desbloqueios este mês: ${usageCount}`);
+
+    if (usageCount >= MAX_PER_MONTH) {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: `Você já utilizou o autodesbloqueio ${usageCount} vez(es) este mês. O limite é de ${MAX_PER_MONTH} vez por mês. Entre em contato com o suporte para mais informações.`,
+          limit_reached: true,
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
@@ -34,7 +71,7 @@ serve(async (req) => {
       'Content-Type': 'application/json',
     };
 
-    // 1. Buscar todos os boletos do cliente para encontrar o vencido (em atraso)
+    // 1. Buscar todos os boletos do cliente
     let allBillings: any[] = [];
     let page = 1;
     const perPage = 100;
@@ -61,7 +98,7 @@ serve(async (req) => {
 
     console.log(`Total billings fetched: ${allBillings.length}`);
 
-    // 2. Encontrar boleto(s) vencido(s) - situation_name "em atraso" ou "atrasado"
+    // 2. Encontrar boleto(s) vencido(s)
     const boletosVencidos = allBillings.filter((b: any) => {
       const sitName = (b.situation_name || b.situation?.name || '').toLowerCase().trim();
       return sitName === 'em atraso' || sitName === 'atrasado';
@@ -76,18 +113,16 @@ serve(async (req) => {
       );
     }
 
-    // 3. Calcular a data do dia seguinte (formato YYYY-MM-DD)
+    // 3. Data do dia seguinte
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
     const newDueDay = tomorrow.toISOString().split('T')[0];
 
-    console.log(`Nova data de vencimento: ${newDueDay}`);
-
-    // 4. Atualizar cada boleto vencido para situação "em observação" com nova data
+    // 4. Atualizar boletos vencidos
     const updateResults: any[] = [];
 
     for (const boleto of boletosVencidos) {
-      console.log(`Atualizando boleto ${boleto.id} - valor: ${boleto.value}, vencimento atual: ${boleto.due_day}`);
+      console.log(`Atualizando boleto ${boleto.id} - valor: ${boleto.value}, vencimento: ${boleto.due_day}`);
 
       const updateResponse = await fetch(
         `https://api.mikweb.com.br/v1/admin/billings/${boleto.id}`,
@@ -96,13 +131,13 @@ serve(async (req) => {
           headers: authHeaders,
           body: JSON.stringify({
             due_day: newDueDay,
-            situation_id: 5, // 5 = Em Observação
+            situation_id: 5,
           }),
         }
       );
 
       const updateText = await updateResponse.text();
-      console.log(`Boleto ${boleto.id} update response: ${updateResponse.status} - ${updateText}`);
+      console.log(`Boleto ${boleto.id} update: ${updateResponse.status} - ${updateText}`);
 
       updateResults.push({
         boleto_id: boleto.id,
@@ -114,19 +149,17 @@ serve(async (req) => {
     const allSuccess = updateResults.every((r) => r.success);
 
     if (!allSuccess) {
-      const failed = updateResults.filter((r) => !r.success);
-      console.error('Some billing updates failed:', JSON.stringify(failed));
+      console.error('Some updates failed:', JSON.stringify(updateResults.filter((r) => !r.success)));
       return new Response(
         JSON.stringify({
           success: false,
           error: 'Não foi possível atualizar todos os boletos. Entre em contato com o suporte.',
-          details: updateResults,
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    // 5. Alterar status de acesso do cliente para Liberado (L)
+    // 5. Liberar acesso
     const desbloqueioResponse = await fetch(
       `https://api.mikweb.com.br/v1/admin/customers/${cliente_id}/access_status`,
       {
@@ -143,6 +176,16 @@ serve(async (req) => {
         JSON.stringify({ success: false, error: 'Boletos atualizados, mas não foi possível liberar o acesso. Entre em contato com o suporte.' }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
+    }
+
+    // 6. Registrar o uso do desbloqueio
+    const { error: insertError } = await supabase
+      .from('desbloqueio_logs')
+      .insert({ cliente_id: Number(cliente_id) });
+
+    if (insertError) {
+      console.error('Error logging desbloqueio:', insertError);
+      // Não bloqueia o sucesso - apenas loga o erro
     }
 
     return new Response(

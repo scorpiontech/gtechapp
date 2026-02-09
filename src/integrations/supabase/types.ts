@@ -14,7 +14,24 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      desbloqueio_logs: {
+        Row: {
+          cliente_id: number
+          created_at: string
+          id: string
+        }
+        Insert: {
+          cliente_id: number
+          created_at?: string
+          id?: string
+        }
+        Update: {
+          cliente_id?: number
+          created_at?: string
+          id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
