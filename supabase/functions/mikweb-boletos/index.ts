@@ -28,24 +28,47 @@ serve(async (req) => {
       );
     }
 
-    const response = await fetch(`https://api.mikweb.com.br/v1/admin/billings?customer_id=${cliente_id}`, {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${apiToken}`,
-        'Content-Type': 'application/json',
-      },
-    });
+    // Fetch all pages of billings
+    let allBillings: any[] = [];
+    let page = 1;
+    const perPage = 100;
 
-    if (!response.ok) {
-      console.error('MikWeb API error:', response.status);
-      return new Response(
-        JSON.stringify({ success: false, error: 'Erro ao consultar boletos' }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
+    while (true) {
+      const response = await fetch(
+        `https://api.mikweb.com.br/v1/admin/billings?customer_id=${cliente_id}&page=${page}&per_page=${perPage}`,
+        {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${apiToken}`,
+            'Content-Type': 'application/json',
+          },
+        }
       );
+
+      if (!response.ok) {
+        console.error('MikWeb API error:', response.status, 'page:', page);
+        return new Response(
+          JSON.stringify({ success: false, error: 'Erro ao consultar boletos' }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
+        );
+      }
+
+      const data = await response.json();
+      const pageBillings = data.billings || data.data || [];
+      console.log(`Page ${page}: ${pageBillings.length} billings`);
+
+      if (!Array.isArray(pageBillings) || pageBillings.length === 0) break;
+      allBillings = allBillings.concat(pageBillings);
+
+      // If we got less than perPage, we've reached the last page
+      if (pageBillings.length < perPage) break;
+      page++;
+      // Safety limit
+      if (page > 20) break;
     }
 
-    const data = await response.json();
-    const titulos = data.billings || data.data || [];
+    const titulos = allBillings;
+    console.log(`Total billings fetched: ${titulos.length}`);
 
     // Log billing fields and all distinct situations for debugging
     if (Array.isArray(titulos) && titulos.length > 0) {
