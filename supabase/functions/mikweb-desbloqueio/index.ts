@@ -28,7 +28,6 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 
     if (!apiToken || !supabaseUrl || !supabaseKey) {
-      console.error('Missing env vars');
       return new Response(
         JSON.stringify({ success: false, error: 'Configuração do servidor incompleta' }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
@@ -37,7 +36,7 @@ serve(async (req) => {
 
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // 0. Verificar limite de uso (máx 1 vez por mês)
+    // 0. Verificar limite mensal
     const now = new Date();
     const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
 
@@ -48,9 +47,7 @@ serve(async (req) => {
       .gte('created_at', firstOfMonth)
       .order('created_at', { ascending: false });
 
-    if (logError) {
-      console.error('Error checking logs:', logError);
-    }
+    if (logError) console.error('Error checking logs:', logError);
 
     const usageCount = logs?.length || 0;
     console.log(`Cliente ${cliente_id} - desbloqueios este mês: ${usageCount}`);
@@ -59,7 +56,7 @@ serve(async (req) => {
       return new Response(
         JSON.stringify({
           success: false,
-          error: `Você já utilizou o autodesbloqueio ${usageCount} vez(es) este mês. O limite é de ${MAX_PER_MONTH} vez por mês. Entre em contato com o suporte para mais informações.`,
+          error: `Você já utilizou o autodesbloqueio ${usageCount} vez(es) este mês. O limite é de ${MAX_PER_MONTH} vez por mês.`,
           limit_reached: true,
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -88,7 +85,7 @@ serve(async (req) => {
 
     const contractsData = await contractsResponse.json();
     const contracts = contractsData.customer_contracts || contractsData.contracts || contractsData.data || [];
-    
+
     if (!Array.isArray(contracts) || contracts.length === 0) {
       return new Response(
         JSON.stringify({ success: false, error: 'Nenhum contrato encontrado para o cliente.' }),
@@ -100,50 +97,57 @@ serve(async (req) => {
     const actualContractId = activeContract.id;
     console.log(`Contrato encontrado: id=${actualContractId}, status=${activeContract.status}, access_status=${activeContract.access_status}`);
 
-    // 2. Buscar boletos do cliente
+    // 2. Buscar dados completos do contrato
+    console.log(`Buscando dados completos do contrato ${actualContractId}...`);
+    const contractDetailResponse = await fetch(
+      `https://api.mikweb.com.br/v1/admin/customer_contracts/${actualContractId}`,
+      { method: 'GET', headers: authHeaders }
+    );
+
+    let contractDetail: any = null;
+    if (contractDetailResponse.ok) {
+      const detailData = await contractDetailResponse.json();
+      contractDetail = detailData.customer_contract || detailData;
+      console.log(`Contrato detalhes obtidos`);
+    } else {
+      console.error(`Erro ao buscar detalhes do contrato: ${contractDetailResponse.status}`);
+    }
+
+    // 3. Buscar boletos vencidos
     let allBillings: any[] = [];
     let page = 1;
-    const perPage = 100;
 
     while (true) {
       const response = await fetch(
-        `https://api.mikweb.com.br/v1/admin/billings?customer_id=${cliente_id}&page=${page}&per_page=${perPage}`,
+        `https://api.mikweb.com.br/v1/admin/billings?customer_id=${cliente_id}&page=${page}&per_page=100`,
         { method: 'GET', headers: authHeaders }
       );
-
-      if (!response.ok) {
-        console.error('Error fetching billings:', response.status);
-        break;
-      }
+      if (!response.ok) break;
 
       const data = await response.json();
       const pageBillings = data.billings || data.data || [];
       if (!Array.isArray(pageBillings) || pageBillings.length === 0) break;
       allBillings = allBillings.concat(pageBillings);
-      if (pageBillings.length < perPage) break;
+      if (pageBillings.length < 100) break;
       page++;
       if (page > 20) break;
     }
 
     console.log(`Total billings fetched: ${allBillings.length}`);
 
-    // 3. Filtrar boletos do contrato ativo que estão vencidos
     const boletosVencidos = allBillings.filter((b: any) => {
       const sitName = (b.situation_name || b.situation?.name || '').toLowerCase().trim();
-      const isVencido = sitName === 'em atraso' || sitName === 'atrasado';
-      // Filtrar pelo contrato ativo se possível
-      const matchContract = !b.contract_id || b.contract_id === actualContractId;
-      return isVencido && matchContract;
+      return sitName === 'em atraso' || sitName === 'atrasado';
     });
 
     console.log(`Boletos vencidos encontrados: ${boletosVencidos.length}`);
     boletosVencidos.forEach((b: any) => {
-      console.log(`Boleto vencido: id=${b.id}, contract_id=${b.contract_id}, value=${b.value}, due_day=${b.due_day}, situation_name=${b.situation_name || b.situation?.name}`);
+      console.log(`Boleto vencido: id=${b.id}, contract_id=${b.contract_id}, value=${b.value}, due_day=${b.due_day}`);
     });
 
     if (boletosVencidos.length === 0) {
       return new Response(
-        JSON.stringify({ success: false, error: 'Nenhum boleto vencido encontrado para realizar o desbloqueio.' }),
+        JSON.stringify({ success: false, error: 'Nenhum boleto vencido encontrado.' }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
@@ -153,146 +157,180 @@ serve(async (req) => {
     tomorrow.setDate(tomorrow.getDate() + 1);
     const newDueDay = tomorrow.toISOString().split('T')[0];
 
-    // 5. Atualizar a situação dos boletos vencidos para "Em Observação" (situation_id: 5)
-    // e alterar o vencimento para o dia seguinte
-    const updateResults: any[] = [];
-    let anySuccess = false;
+    // 5. Liberar acesso via contrato com allow_release_in_trust
+    // A API MikWeb exige que alterações em boletos sejam feitas pelo contrato
+    // Usar PUT no contrato para liberar o acesso e alterar a situação
+    
+    const contractUpdateBody: any = {
+      access_status: 'access_activated',
+      allow_release_in_trust: true,
+    };
 
-    for (const boleto of boletosVencidos) {
-      const boletoId = boleto.id;
-      console.log(`Atualizando boleto ${boletoId} - valor: ${boleto.value}, vencimento: ${boleto.due_day}`);
+    // Incluir campos obrigatórios do contrato
+    if (contractDetail) {
+      contractUpdateBody.financial_options_status = contractDetail.financial_options_status || 'default';
+      contractUpdateBody.discount_enabled = contractDetail.discount_enabled ?? false;
+      contractUpdateBody.addition_enabled = contractDetail.addition_enabled ?? false;
+      contractUpdateBody.billing_address_zip_code = contractDetail.billing_address_zip_code || '';
+      contractUpdateBody.billing_address_street = contractDetail.billing_address_street || '';
+      contractUpdateBody.billing_address_number = contractDetail.billing_address_number || '';
+      contractUpdateBody.billing_address_complement = contractDetail.billing_address_complement || '';
+      contractUpdateBody.billing_address_neighborhood = contractDetail.billing_address_neighborhood || '';
+      contractUpdateBody.billing_address_city = contractDetail.billing_address_city || '';
+      contractUpdateBody.billing_address_state = contractDetail.billing_address_state || '';
+    }
 
-      const updateBody = {
-        due_day: newDueDay,
-        situation_id: 5, // Em Observação
-      };
-
-      // Tentativa 1: PUT /v1/admin/billings/{id}
-      console.log(`Tentativa 1: PUT /v1/admin/billings/${boletoId}`, JSON.stringify(updateBody));
-      let updateResponse = await fetch(
-        `https://api.mikweb.com.br/v1/admin/billings/${boletoId}`,
-        {
-          method: 'PUT',
-          headers: authHeaders,
-          body: JSON.stringify(updateBody),
-        }
-      );
-      let updateText = await updateResponse.text();
-      console.log(`PUT /billings/${boletoId}: ${updateResponse.status} - ${updateText}`);
-
-      if (updateResponse.ok) {
-        anySuccess = true;
-        updateResults.push({ boleto_id: boletoId, success: true, method: 'PUT /billings' });
-        continue;
+    console.log(`Tentativa 1: PUT /customer_contracts/${actualContractId} com allow_release_in_trust`, JSON.stringify(contractUpdateBody));
+    const releaseResponse = await fetch(
+      `https://api.mikweb.com.br/v1/admin/customer_contracts/${actualContractId}`,
+      {
+        method: 'PUT',
+        headers: authHeaders,
+        body: JSON.stringify(contractUpdateBody),
       }
+    );
+    const releaseText = await releaseResponse.text();
+    console.log(`PUT /customer_contracts/${actualContractId}: ${releaseResponse.status} - ${releaseText}`);
 
-      // Tentativa 2: PATCH /v1/admin/billings/{id}
-      console.log(`Tentativa 2: PATCH /v1/admin/billings/${boletoId}`);
-      updateResponse = await fetch(
-        `https://api.mikweb.com.br/v1/admin/billings/${boletoId}`,
-        {
-          method: 'PATCH',
-          headers: authHeaders,
-          body: JSON.stringify(updateBody),
-        }
-      );
-      updateText = await updateResponse.text();
-      console.log(`PATCH /billings/${boletoId}: ${updateResponse.status} - ${updateText}`);
-
-      if (updateResponse.ok) {
-        anySuccess = true;
-        updateResults.push({ boleto_id: boletoId, success: true, method: 'PATCH /billings' });
-        continue;
+    // Verificar se o access_status mudou
+    let accessUpdated = false;
+    if (releaseResponse.ok) {
+      try {
+        const releaseData = JSON.parse(releaseText);
+        const updatedContract = releaseData.customer_contract || releaseData;
+        const newAccessStatus = updatedContract.access_status;
+        console.log(`Novo access_status após PUT: ${newAccessStatus}`);
+        accessUpdated = newAccessStatus === 'access_activated';
+      } catch (e) {
+        console.log('Não foi possível parsear resposta do contrato');
       }
+    }
 
-      // Tentativa 3: PUT via contrato /v1/admin/customer_contracts/{contract_id}/billings/{billing_id}
-      console.log(`Tentativa 3: PUT /customer_contracts/${actualContractId}/billings/${boletoId}`);
-      updateResponse = await fetch(
-        `https://api.mikweb.com.br/v1/admin/customer_contracts/${actualContractId}/billings/${boletoId}`,
-        {
-          method: 'PUT',
-          headers: authHeaders,
-          body: JSON.stringify(updateBody),
-        }
-      );
-      updateText = await updateResponse.text();
-      console.log(`PUT /customer_contracts/${actualContractId}/billings/${boletoId}: ${updateResponse.status} - ${updateText}`);
-
-      if (updateResponse.ok) {
-        anySuccess = true;
-        updateResults.push({ boleto_id: boletoId, success: true, method: 'PUT /customer_contracts/billings' });
-        continue;
-      }
-
-      // Tentativa 4: POST para recriar/atualizar o boleto com os novos dados
-      const recreateBody = {
-        customer_id: Number(cliente_id),
-        contract_id: actualContractId,
-        due_day: newDueDay,
-        situation_id: 5,
-        value: boleto.value,
-        reference: boleto.reference || 'Mensalidade',
-        type_billing: boleto.type_billing || 'M',
-      };
-      console.log(`Tentativa 4: POST /billings (recriar)`, JSON.stringify(recreateBody));
-      updateResponse = await fetch(
-        `https://api.mikweb.com.br/v1/admin/billings`,
+    // Tentativa 2: Se o access_status não mudou, tentar POST release_in_trust
+    if (!accessUpdated) {
+      console.log(`Tentativa 2: POST /customer_contracts/${actualContractId}/release_in_trust`);
+      const trustResponse = await fetch(
+        `https://api.mikweb.com.br/v1/admin/customer_contracts/${actualContractId}/release_in_trust`,
         {
           method: 'POST',
           headers: authHeaders,
-          body: JSON.stringify(recreateBody),
+          body: JSON.stringify({}),
         }
       );
-      updateText = await updateResponse.text();
-      console.log(`POST /billings: ${updateResponse.status} - ${updateText}`);
+      const trustText = await trustResponse.text();
+      console.log(`POST /release_in_trust: ${trustResponse.status} - ${trustText}`);
 
-      if (updateResponse.ok) {
-        anySuccess = true;
-        updateResults.push({ boleto_id: boletoId, success: true, method: 'POST /billings (recreated)' });
-        continue;
+      if (trustResponse.ok) {
+        accessUpdated = true;
       }
-
-      // Todas as tentativas falharam para este boleto
-      updateResults.push({ 
-        boleto_id: boletoId, 
-        success: false, 
-        last_status: updateResponse.status,
-        last_response: updateText.substring(0, 200),
-      });
     }
 
-    console.log('Update results:', JSON.stringify(updateResults));
+    // Tentativa 3: PUT no contrato apenas com access_status (sem outros campos)
+    if (!accessUpdated) {
+      console.log(`Tentativa 3: PUT /customer_contracts/${actualContractId} somente access_status`);
+      const simpleResponse = await fetch(
+        `https://api.mikweb.com.br/v1/admin/customer_contracts/${actualContractId}`,
+        {
+          method: 'PUT',
+          headers: authHeaders,
+          body: JSON.stringify({ access_status: 'access_activated' }),
+        }
+      );
+      const simpleText = await simpleResponse.text();
+      console.log(`PUT simples: ${simpleResponse.status} - ${simpleText}`);
 
-    if (!anySuccess) {
+      if (simpleResponse.ok) {
+        try {
+          const simpleData = JSON.parse(simpleText);
+          const sc = simpleData.customer_contract || simpleData;
+          accessUpdated = sc.access_status === 'access_activated';
+          console.log(`access_status após PUT simples: ${sc.access_status}`);
+        } catch (e) {}
+      }
+    }
+
+    // Tentativa 4: PATCH no contrato
+    if (!accessUpdated) {
+      console.log(`Tentativa 4: PATCH /customer_contracts/${actualContractId}`);
+      const patchResponse = await fetch(
+        `https://api.mikweb.com.br/v1/admin/customer_contracts/${actualContractId}`,
+        {
+          method: 'PATCH',
+          headers: authHeaders,
+          body: JSON.stringify({ access_status: 'access_activated' }),
+        }
+      );
+      const patchText = await patchResponse.text();
+      console.log(`PATCH: ${patchResponse.status} - ${patchText}`);
+
+      if (patchResponse.ok) {
+        accessUpdated = true;
+      }
+    }
+
+    // Tentativa 5: PUT no customer com access_status
+    if (!accessUpdated) {
+      console.log(`Tentativa 5: PUT /customers/${cliente_id} com access_status`);
+      const custResponse = await fetch(
+        `https://api.mikweb.com.br/v1/admin/customers/${cliente_id}`,
+        {
+          method: 'PUT',
+          headers: authHeaders,
+          body: JSON.stringify({ access_status: 'L' }),
+        }
+      );
+      const custText = await custResponse.text();
+      console.log(`PUT /customers/${cliente_id}: ${custResponse.status} - ${custText}`);
+
+      if (custResponse.ok) {
+        accessUpdated = true;
+      }
+    }
+
+    // Tentativa 6: Endpoint de alteração de status de acesso
+    if (!accessUpdated) {
+      console.log(`Tentativa 6: PUT /customers/${cliente_id}/change_access_status`);
+      const changeResponse = await fetch(
+        `https://api.mikweb.com.br/v1/admin/customers/${cliente_id}/change_access_status`,
+        {
+          method: 'PUT',
+          headers: authHeaders,
+          body: JSON.stringify({ access_status: 'L' }),
+        }
+      );
+      const changeText = await changeResponse.text();
+      console.log(`PUT /change_access_status: ${changeResponse.status} - ${changeText}`);
+
+      if (changeResponse.ok) {
+        accessUpdated = true;
+      }
+    }
+
+    if (!accessUpdated) {
+      console.error('Nenhuma tentativa conseguiu liberar o acesso');
       return new Response(
         JSON.stringify({ 
           success: false, 
-          error: 'Não foi possível atualizar a situação do(s) boleto(s) vencido(s). Entre em contato com o suporte.',
-          details: updateResults,
+          error: 'Não foi possível liberar o acesso. Entre em contato com o suporte.',
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    // 6. Registrar o uso do desbloqueio
+    // 6. Registrar uso
     const { error: insertError } = await supabase
       .from('desbloqueio_logs')
       .insert({ cliente_id: Number(cliente_id) });
 
-    if (insertError) {
-      console.error('Error logging desbloqueio:', insertError);
-    }
+    if (insertError) console.error('Error logging desbloqueio:', insertError);
 
-    const successCount = updateResults.filter(r => r.success).length;
-    const successMethods = updateResults.filter(r => r.success).map(r => r.method).join(', ');
-    console.log(`Desbloqueio concluído: ${successCount} boleto(s) atualizado(s) via ${successMethods}`);
+    console.log('Desbloqueio concluído com sucesso');
 
     return new Response(
       JSON.stringify({
         success: true,
-        message: `Desbloqueio realizado com sucesso! ${successCount} boleto(s) atualizado(s) para "Em Observação" com vencimento para ${newDueDay}. Aguarde alguns instantes para que a conexão seja restabelecida.`,
-        boletos_atualizados: successCount,
-        details: updateResults,
+        message: `Desbloqueio realizado com sucesso! Sua conexão será liberada em instantes.`,
+        boletos_atualizados: boletosVencidos.length,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
