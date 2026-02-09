@@ -135,15 +135,23 @@ serve(async (req) => {
     // 2. Colocar boletos vencidos em observação via endpoint correto
     try {
       console.log(`Buscando boletos vencidos do cliente ${cliente_id}...`);
+      // Buscar boletos em aberto (situation_id=2) e em atraso (situation_id=3)
       const billingsResp = await fetch(
-        `https://api.mikweb.com.br/v1/admin/billings?customer_id=${cliente_id}&situation_id=3`,
+        `https://api.mikweb.com.br/v1/admin/billings?customer_id=${cliente_id}`,
         { method: 'GET', headers: authHeaders }
       );
 
       if (billingsResp.ok) {
         const billingsData = await billingsResp.json();
-        const billings = billingsData.billings || billingsData.data || [];
-        console.log(`Boletos vencidos encontrados: ${billings.length}`);
+        const allBillings = billingsData.billings || billingsData.data || [];
+        // Filtrar boletos vencidos: situation_id 2 ou 3, com data de vencimento no passado
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const billings = allBillings.filter((b: any) => {
+          const due = new Date(b.due_day || b.vencimento);
+          return due < today && [2, 3].includes(b.situation_id);
+        });
+        console.log(`Boletos vencidos encontrados: ${billings.length} (de ${allBillings.length} total)`);
 
         // lock_in = amanhã no formato dd-MM-yyyy
         const tomorrow = new Date();
