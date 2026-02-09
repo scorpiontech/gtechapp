@@ -50,7 +50,7 @@ const Desbloqueio: React.FC = () => {
 
     try {
       const { data, error } = await supabase.functions.invoke('mikweb-desbloqueio', {
-        body: { cliente_id: cliente.id },
+        body: { cliente_id: cliente.id, contrato_id: (cliente as any).contrato_id || null },
       });
 
       if (error) throw error;
