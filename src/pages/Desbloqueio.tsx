@@ -28,15 +28,18 @@ const Desbloqueio: React.FC = () => {
 
   if (!cliente) return null;
 
-  const accessStatus = cliente?.access_status;
-  const isBloqueado = accessStatus === 'B' || cliente?.bloqueado === true;
+  const accessStatus = (cliente?.access_status || '').toLowerCase();
+  const isBloqueado = accessStatus === 'b' || accessStatus === 'access_blocked' || accessStatus === 'access_pending' || cliente?.bloqueado === true;
 
   const statusLabel = (() => {
     switch (accessStatus) {
-      case 'L': return 'Conexão liberada';
-      case 'B': return 'Conexão bloqueada';
-      case 'CA': return 'Bloqueio parcial';
-      case 'CM': return 'Bloqueio total';
+      case 'l':
+      case 'access_activated': return 'Conexão liberada';
+      case 'b':
+      case 'access_blocked': return 'Conexão bloqueada';
+      case 'ca':
+      case 'access_pending': return 'Bloqueio parcial';
+      case 'cm': return 'Bloqueio total';
       default: return cliente?.bloqueado ? 'Conexão bloqueada' : 'Conexão ativa';
     }
   })();
