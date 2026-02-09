@@ -64,45 +64,84 @@ serve(async (req) => {
       'Content-Type': 'application/json',
     };
 
-    // 1. Liberar acesso via PUT /customers/<ID>/msg_payment com msg_payment_mk = "L"
-    console.log(`Liberando acesso do cliente ${cliente_id} via PUT /customers/${cliente_id}/msg_payment...`);
-    const unlockResp = await fetch(
-      `https://api.mikweb.com.br/v1/admin/customers/${cliente_id}/msg_payment`,
-      {
-        method: 'PUT',
-        headers: authHeaders,
-        body: JSON.stringify({ msg_payment_mk: 'L' }),
-      }
+    // 1. Buscar contrato do cliente para obter o contract_id
+    console.log(`Buscando contratos do cliente ${cliente_id}...`);
+    const contractsResp = await fetch(
+      `https://api.mikweb.com.br/v1/admin/customer_contracts?customer_id=${cliente_id}`,
+      { method: 'GET', headers: authHeaders }
     );
 
-    const unlockText = await unlockResp.text();
-    console.log(`PUT /customers/${cliente_id}/msg_payment: ${unlockResp.status} - ${unlockText.substring(0, 600)}`);
+    let contractId: number | null = null;
 
-    if (!unlockResp.ok) {
-      console.error(`Falha ao liberar acesso: ${unlockResp.status}`);
-      return new Response(
-        JSON.stringify({ success: false, error: 'Não foi possível liberar o acesso. Entre em contato com o suporte.' }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+    if (contractsResp.ok) {
+      const contractsData = await contractsResp.json();
+      const contracts = contractsData.customer_contracts || contractsData.contracts || contractsData.data || [];
+      const activeContract = contracts?.find((c: any) => c.status === 'active') || contracts?.[0];
+      if (activeContract) {
+        contractId = activeContract.id;
+        console.log(`Contrato encontrado: id=${contractId}, access_status=${activeContract.access_status}`);
+      }
     }
 
-    // Verificar se o status foi alterado
     let success = false;
-    try {
-      const parsed = JSON.parse(unlockText);
-      const customer = parsed.customer || parsed;
-      console.log(`Novo msg_payment_mk: ${customer.msg_payment_mk}`);
-      if (customer.msg_payment_mk === 'L') {
+
+    if (contractId) {
+      // Cliente usa estrutura de contratos - usar PUT /customer_contracts/<ID>/msg_payment
+      console.log(`Tentando liberar via PUT /customer_contracts/${contractId}/msg_payment...`);
+      const unlockResp = await fetch(
+        `https://api.mikweb.com.br/v1/admin/customer_contracts/${contractId}/msg_payment`,
+        {
+          method: 'PUT',
+          headers: authHeaders,
+          body: JSON.stringify({ msg_payment_mk: 'L' }),
+        }
+      );
+
+      const unlockText = await unlockResp.text();
+      console.log(`PUT /customer_contracts/${contractId}/msg_payment: ${unlockResp.status} - ${unlockText.substring(0, 600)}`);
+
+      if (unlockResp.ok) {
         success = true;
-        console.log('Acesso liberado com sucesso!');
+        console.log('Acesso liberado via contrato!');
       } else {
-        console.log(`msg_payment_mk retornado: ${customer.msg_payment_mk} (esperado: L)`);
-        // Mesmo que não seja L, se o PUT retornou 200 consideramos sucesso
-        success = true;
+        console.error(`Falha via contrato: ${unlockResp.status}`);
+        
+        // Fallback: tentar via customer endpoint
+        console.log(`Fallback: tentando via PUT /customers/${cliente_id}/msg_payment...`);
+        const fallbackResp = await fetch(
+          `https://api.mikweb.com.br/v1/admin/customers/${cliente_id}/msg_payment`,
+          {
+            method: 'PUT',
+            headers: authHeaders,
+            body: JSON.stringify({ msg_payment_mk: 'L' }),
+          }
+        );
+        const fallbackText = await fallbackResp.text();
+        console.log(`PUT /customers/${cliente_id}/msg_payment: ${fallbackResp.status} - ${fallbackText.substring(0, 600)}`);
+
+        if (fallbackResp.ok) {
+          success = true;
+          console.log('Acesso liberado via cliente!');
+        }
       }
-    } catch (e) {
-      // Se não consegue parsear mas retornou 200, assume sucesso
-      success = true;
+    } else {
+      // Sem contrato, tentar direto pelo cliente
+      console.log(`Sem contrato, tentando via PUT /customers/${cliente_id}/msg_payment...`);
+      const unlockResp = await fetch(
+        `https://api.mikweb.com.br/v1/admin/customers/${cliente_id}/msg_payment`,
+        {
+          method: 'PUT',
+          headers: authHeaders,
+          body: JSON.stringify({ msg_payment_mk: 'L' }),
+        }
+      );
+      const unlockText = await unlockResp.text();
+      console.log(`PUT /customers/${cliente_id}/msg_payment: ${unlockResp.status} - ${unlockText.substring(0, 600)}`);
+
+      if (unlockResp.ok) {
+        success = true;
+        console.log('Acesso liberado via cliente!');
+      }
     }
 
     // 2. Tentar colocar boletos vencidos em observação (resiliência - não bloqueia se falhar)
@@ -118,7 +157,6 @@ serve(async (req) => {
         const billings = billingsData.billings || billingsData.data || [];
         console.log(`Boletos vencidos encontrados: ${billings.length}`);
 
-        // Atualizar vencimento para amanhã e colocar em observação
         const tomorrow = new Date();
         tomorrow.setDate(tomorrow.getDate() + 1);
         const tomorrowStr = tomorrow.toISOString().split('T')[0];
