@@ -6,7 +6,6 @@ const corsHeaders = {
 };
 
 serve(async (req) => {
-  // Handle CORS preflight
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
@@ -23,14 +22,12 @@ serve(async (req) => {
 
     const apiToken = Deno.env.get('MIKWEB_API_TOKEN');
     if (!apiToken) {
-      console.error('MIKWEB_API_TOKEN not configured');
       return new Response(
         JSON.stringify({ success: false, error: 'Configuração do servidor incompleta' }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
       );
     }
 
-    // Buscar boletos do cliente na API MikWeb
     const response = await fetch(`https://api.mikweb.com.br/v1/admin/billings?customer_id=${cliente_id}`, {
       method: 'GET',
       headers: {
@@ -40,7 +37,7 @@ serve(async (req) => {
     });
 
     if (!response.ok) {
-      console.error('MikWeb API error:', response.status, await response.text());
+      console.error('MikWeb API error:', response.status);
       return new Response(
         JSON.stringify({ success: false, error: 'Erro ao consultar boletos' }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
@@ -48,53 +45,65 @@ serve(async (req) => {
     }
 
     const data = await response.json();
-    console.log('MikWeb Boletos API response:', JSON.stringify(data).substring(0, 500));
-    
     const titulos = data.billings || data.data || [];
 
-    // Mapear os títulos para o formato esperado pelo frontend
+    // Log first billing fields for debugging
+    if (Array.isArray(titulos) && titulos.length > 0) {
+      console.log('Billing fields:', Object.keys(titulos[0]).join(', '));
+      const b = titulos[0];
+      console.log('Sample billing:', JSON.stringify({
+        id: b.id, situation_id: b.situation_id, due_day: b.due_day,
+        value: b.value, value_paid: b.value_paid, date_payment: b.date_payment,
+        digitable_line: b.digitable_line?.substring(0, 30),
+        pix_qr_code: b.pix_qr_code?.substring(0, 30),
+        pix_copy_paste: b.pix_copy_paste?.substring(0, 30),
+        billing_url: b.billing_url?.substring(0, 50),
+        barcode: b.barcode?.substring(0, 30),
+      }));
+    }
+
+    // MikWeb situation_id mapping:
+    // 1 = Aberto, 2 = Atrasado, 3 = Pago, 4 = Cancelado, 5 = Remessa
+    const situationMap: Record<number, string> = {
+      1: 'aberto',
+      2: 'vencido',
+      3: 'pago',
+      4: 'cancelado',
+      5: 'aberto',
+    };
+
     const boletos = Array.isArray(titulos) ? titulos.map((billing: any) => {
-      // Determinar status baseado nos campos da API
-      let status = billing.status || billing.situation || 'aberto';
-      if (typeof status === 'string') {
-        status = status.toLowerCase();
-        if (status === 'paid' || status === 'pago' || status === 'p') {
-          status = 'pago';
-        } else if (status === 'canceled' || status === 'cancelado' || status === 'c') {
-          status = 'cancelado';
-        } else {
-          status = 'aberto';
-        }
-      }
-      
+      const situationId = Number(billing.situation_id);
+      const status = situationMap[situationId] || 'aberto';
+
       return {
         id: billing.id,
         cliente_id: billing.customer_id,
         valor: parseFloat(billing.value) || 0,
-        vencimento: billing.due_date,
+        valor_pago: billing.value_paid ? parseFloat(billing.value_paid) : null,
+        vencimento: billing.due_day || null, // "2025-12-25" format
+        data_pagamento: billing.date_payment || null,
         data_emissao: billing.created_at,
-        status: status,
-        linha_digitavel: billing.digitable_line || billing.barcode_line,
-        codigo_barras: billing.barcode,
-        link_boleto: billing.billing_url || billing.url,
-        nosso_numero: billing.our_number,
+        status,
+        situation_id: situationId,
+        referencia: billing.reference || null,
+        linha_digitavel: billing.digitable_line || billing.barcode_line || null,
+        codigo_barras: billing.barcode || null,
+        link_boleto: billing.billing_url || billing.url || null,
+        nosso_numero: billing.our_number || null,
+        pix_qr_code: billing.pix_qr_code || billing.qr_code || billing.pix_qrcode || null,
+        pix_copy_paste: billing.pix_copy_paste || billing.pix_emv || billing.pix || null,
       };
     }) : [];
 
-    // Ordenar: abertos primeiro, depois por vencimento (mais antigos primeiro para abertos, mais recentes para pagos)
+    // Sort: abertos/vencidos first, then pagos
     boletos.sort((a: any, b: any) => {
-      // Prioridade: abertos > vencidos > pagos > cancelados
-      const statusPriority: Record<string, number> = { aberto: 0, vencido: 1, pago: 2, cancelado: 3 };
-      const priorityA = statusPriority[a.status] ?? 1;
-      const priorityB = statusPriority[b.status] ?? 1;
-      
-      if (priorityA !== priorityB) {
-        return priorityA - priorityB;
-      }
-      
-      // Para abertos, mostrar os mais próximos do vencimento primeiro
-      // Para pagos, mostrar os mais recentes primeiro
-      if (a.status === 'aberto') {
+      const priority: Record<string, number> = { vencido: 0, aberto: 1, pago: 2, cancelado: 3 };
+      const pA = priority[a.status] ?? 1;
+      const pB = priority[b.status] ?? 1;
+      if (pA !== pB) return pA - pB;
+
+      if (a.status === 'aberto' || a.status === 'vencido') {
         return new Date(a.vencimento).getTime() - new Date(b.vencimento).getTime();
       }
       return new Date(b.vencimento).getTime() - new Date(a.vencimento).getTime();
