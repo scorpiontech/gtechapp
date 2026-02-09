@@ -145,6 +145,14 @@ serve(async (req) => {
     console.log('Due day:', cliente.due_day);
     console.log('Observation:', cliente.observation);
     console.log('Additional observation:', cliente.additional_observation);
+    console.log('Customer group:', cliente.customer_group ? JSON.stringify(cliente.customer_group) : 'null');
+    console.log('Server:', cliente.server ? JSON.stringify(cliente.server) : 'null');
+    console.log('Customer contracts:', cliente.customer_contracts ? JSON.stringify(cliente.customer_contracts) : 'null');
+    console.log('Contract template_id:', cliente.contract_template_id);
+    console.log('Default contract_template_id:', cliente.default_contract_template_id);
+    console.log('msg_payment_mk:', cliente.msg_payment_mk);
+    console.log('Name field:', cliente.name);
+    console.log('Uses contract structure:', cliente.uses_contract_structure);
 
     // Verificar status financeiro para determinar se está bloqueado
     const isBloqueado = cliente.financial_status === 'B' || cliente.status === 'Bloqueado';
@@ -236,6 +244,16 @@ serve(async (req) => {
       console.log('Contract fields:', Object.keys(contrato).join(', '));
       console.log('Contract name:', contrato.name);
       console.log('Contract description:', contrato.description);
+      console.log('Contract plan:', contrato.plan ? JSON.stringify(contrato.plan) : 'null');
+      console.log('Contract plan_id:', contrato.plan_id);
+      console.log('Contract integration_id:', contrato.integration_id);
+      console.log('Contract customer:', contrato.customer ? 'present' : 'null');
+      // Dump all string/number values to find plan name
+      for (const [k, v] of Object.entries(contrato)) {
+        if (typeof v === 'string' || typeof v === 'number') {
+          console.log(`  contract.${k} =`, v);
+        }
+      }
 
       // Extrair valor e vencimento do contrato
       valorPlano =
@@ -339,21 +357,6 @@ serve(async (req) => {
           valorPlano = valorPlano ?? toNumberOrNull(plan?.value);
         }
       }
-      
-      // 4) Último fallback: template do contrato (menos desejável)
-      const templateId = contrato.contract_template_id;
-      if (!planoNome && templateId) {
-        const templateUrl = `https://api.mikweb.com.br/v1/admin/contract_templates/${templateId}`;
-        console.log('Fetching contract template URL (fallback):', templateUrl);
-
-        const templateRes = await fetch(templateUrl, { method: 'GET', headers: authHeaders });
-        if (templateRes.ok) {
-          const templateJson: any = await templateRes.json();
-          const template = templateJson?.contract_template || templateJson?.template || templateJson;
-          planoNome = template?.name ?? template?.title ?? null;
-          console.log('Template name (fallback):', planoNome);
-        }
-      }
     };
 
     if (!planoNome || valorPlano === null || vencimento === null) {
@@ -412,6 +415,84 @@ serve(async (req) => {
           await applyContratoData(contrato, 'GET /customer_contracts/{id}');
         } else {
           console.log('Customer contract fetch failed:', contractText);
+        }
+      }
+    }
+
+    // Buscar nome do plano via billings e conexões (fora do applyContratoData para ter acesso a cliente.id)
+    if (!planoNome && cliente.id) {
+      // Billings - cobranças podem ter descrição do plano
+      const billingsUrl = `https://api.mikweb.com.br/v1/admin/billings?customer_id=${cliente.id}&per_page=1`;
+      console.log('Fetching billings for plan name:', billingsUrl);
+      const billingsRes = await fetch(billingsUrl, { method: 'GET', headers: authHeaders });
+      if (billingsRes.ok) {
+        const billingsJson: any = await billingsRes.json();
+        const billings = billingsJson?.billings || billingsJson?.data || [];
+        if (Array.isArray(billings) && billings.length > 0) {
+          const billing = billings[0];
+          console.log('Billing fields:', Object.keys(billing).join(', '));
+          for (const [k, v] of Object.entries(billing)) {
+            if (typeof v === 'string' && v.length > 0 && v.length < 200) {
+              console.log(`  billing.${k} =`, v);
+            }
+          }
+          const items = billing.billing_items || billing.items || [];
+          if (Array.isArray(items)) {
+            for (const item of items) {
+              console.log('Billing item:', JSON.stringify(item));
+              const itemName = item.description || item.name || item.plan_name || item.title;
+              if (itemName && !/contrato do cliente/i.test(itemName)) {
+                planoNome = itemName;
+                console.log('Plan name from billing item:', planoNome);
+                break;
+              }
+            }
+          }
+        }
+      } else {
+        console.log('Billings fetch failed:', billingsRes.status);
+      }
+    }
+
+    if (!planoNome && cliente.id) {
+      // Conexões do cliente
+      const connUrl = `https://api.mikweb.com.br/v1/admin/connections?customer_id=${cliente.id}`;
+      console.log('Fetching connections for plan name:', connUrl);
+      const connRes = await fetch(connUrl, { method: 'GET', headers: authHeaders });
+      if (connRes.ok) {
+        const connJson: any = await connRes.json();
+        const connections = connJson?.connections || connJson?.data || [];
+        if (Array.isArray(connections) && connections.length > 0) {
+          const conn = connections[0];
+          console.log('Connection fields:', Object.keys(conn).join(', '));
+          for (const [k, v] of Object.entries(conn)) {
+            if ((typeof v === 'string' || typeof v === 'number') && String(v).length < 200) {
+              console.log(`  connection.${k} =`, v);
+            }
+          }
+          const connPlan = conn.plan?.name || conn.plan_name;
+          if (connPlan) {
+            planoNome = connPlan;
+            console.log('Plan name from connection:', planoNome);
+          }
+        }
+      } else {
+        console.log('Connections fetch failed:', connRes.status);
+      }
+    }
+
+    // Último fallback: template do contrato
+    if (!planoNome) {
+      const templateId = cliente.contract_template_id || cliente.default_contract_template_id;
+      if (templateId) {
+        const templateUrl = `https://api.mikweb.com.br/v1/admin/contract_templates/${templateId}`;
+        console.log('Fetching contract template URL (last fallback):', templateUrl);
+        const templateRes = await fetch(templateUrl, { method: 'GET', headers: authHeaders });
+        if (templateRes.ok) {
+          const templateJson: any = await templateRes.json();
+          const template = templateJson?.contract_template || templateJson?.template || templateJson;
+          planoNome = template?.name ?? template?.title ?? null;
+          console.log('Template name (fallback):', planoNome);
         }
       }
     }
