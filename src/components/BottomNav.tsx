@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
-import { Home, FileText, Receipt, Unlock } from 'lucide-react';
+import { Home, FileText, Receipt, Unlock, Headphones } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const navItems = [
@@ -8,6 +8,7 @@ const navItems = [
   { to: '/contrato', icon: FileText, label: 'Contrato' },
   { to: '/boletos', icon: Receipt, label: 'Boletos' },
   { to: '/desbloqueio', icon: Unlock, label: 'Desbloqueio' },
+  { to: '/chamados', icon: Headphones, label: 'Chamados' },
 ];
 
 export const BottomNav: React.FC = () => {
