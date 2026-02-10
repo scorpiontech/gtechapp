@@ -1,1 +1,4 @@
 project_id = "oumvvmuwxztucynrgull"
+
+[functions.mikweb-chamados]
+verify_jwt = false

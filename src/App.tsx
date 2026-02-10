@@ -9,6 +9,7 @@ import Dashboard from "./pages/Dashboard";
 import Contrato from "./pages/Contrato";
 import Boletos from "./pages/Boletos";
 import Desbloqueio from "./pages/Desbloqueio";
+import Chamados from "./pages/Chamados";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -59,6 +60,7 @@ const AppRoutes = () => {
       <Route path="/contrato" element={<ProtectedRoute><Contrato /></ProtectedRoute>} />
       <Route path="/boletos" element={<ProtectedRoute><Boletos /></ProtectedRoute>} />
       <Route path="/desbloqueio" element={<ProtectedRoute><Desbloqueio /></ProtectedRoute>} />
+      <Route path="/chamados" element={<ProtectedRoute><Chamados /></ProtectedRoute>} />
       <Route path="*" element={<NotFound />} />
     </Routes>
   );
