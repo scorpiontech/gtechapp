@@ -2,3 +2,6 @@ project_id = "oumvvmuwxztucynrgull"
 
 [functions.mikweb-chamados]
 verify_jwt = false
+
+[functions.mikweb-list-chamados]
+verify_jwt = false
