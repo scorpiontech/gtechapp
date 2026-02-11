@@ -1,8 +1,9 @@
 import React from 'react';
-import { ArrowLeft, LogOut } from 'lucide-react';
+import { ArrowLeft, LogOut, Moon, Sun } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import { useTheme } from 'next-themes';
 import gtechLogo from '@/assets/gtech-logo.png';
 
 interface MobileHeaderProps {
@@ -19,6 +20,7 @@ export const MobileHeader: React.FC<MobileHeaderProps> = ({
   const navigate = useNavigate();
   const location = useLocation();
   const { logout, isAuthenticated } = useAuth();
+  const { theme, setTheme } = useTheme();
 
   const handleLogout = () => {
     logout();
@@ -57,16 +59,27 @@ export const MobileHeader: React.FC<MobileHeaderProps> = ({
           )}
         </div>
 
-        {showLogout && isAuthenticated && !isLoginPage && (
+        <div className="flex items-center gap-1">
           <Button
             variant="ghost"
             size="icon"
-            onClick={handleLogout}
-            className="text-muted-foreground hover:text-destructive"
+            onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+            className="text-muted-foreground"
           >
-            <LogOut className="h-5 w-5" />
+            {theme === 'dark' ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
           </Button>
-        )}
+
+          {showLogout && isAuthenticated && !isLoginPage && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={handleLogout}
+              className="text-muted-foreground hover:text-destructive"
+            >
+              <LogOut className="h-5 w-5" />
+            </Button>
+          )}
+        </div>
       </div>
     </header>
   );
