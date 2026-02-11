@@ -68,7 +68,7 @@ const Login: React.FC = () => {
           <CardHeader className="space-y-1 pb-4">
             <CardTitle className="text-xl text-center">Entrar</CardTitle>
             <CardDescription className="text-center">
-              Digite seu CPF para acessar
+              Informe sua credencial
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -102,7 +102,15 @@ const Login: React.FC = () => {
         </Card>
 
         <p className="text-xs text-center text-muted-foreground">
-          Problemas para acessar? Entre em contato com nosso suporte.
+          Problemas para acessar?{' '}
+          <a
+            href="https://wa.me/08005900456"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-primary underline hover:text-primary/80"
+          >
+            Entre em contato com nosso suporte
+          </a>
         </p>
       </div>
     </div>
