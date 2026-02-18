@@ -104,7 +104,7 @@ const Login: React.FC = () => {
         <p className="text-xs text-center text-muted-foreground">
           Problemas para acessar?{' '}
           <a
-            href="https://wa.me/08005900456"
+            href="https://wa.me/5508005900456"
             target="_blank"
             rel="noopener noreferrer"
             className="text-primary underline hover:text-primary/80"
