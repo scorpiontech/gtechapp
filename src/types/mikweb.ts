@@ -25,6 +25,17 @@ export interface MikWebCliente {
   access_status?: string | null;
   conexao_id?: number;
   conexao_login?: string;
+  contratos?: MikWebContratoResumo[];
+}
+
+export interface MikWebContratoResumo {
+  id: number;
+  plano_nome: string | null;
+  valor: number | null;
+  vencimento: number | null;
+  status: string | null;
+  data_inicio: string | null;
+  data_fim: string | null;
 }
 
 export interface MikWebContrato {
