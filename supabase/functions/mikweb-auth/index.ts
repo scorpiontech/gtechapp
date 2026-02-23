@@ -512,6 +512,56 @@ serve(async (req) => {
       }
     }
 
+    // ===== Coletar TODOS os contratos do cliente =====
+    const allContratos: any[] = [];
+    
+    if (cliente.id) {
+      const allContratosUrl = `https://api.mikweb.com.br/v1/admin/customer_contracts?customer_id=${cliente.id}`;
+      console.log('Fetching ALL contracts for customer:', allContratosUrl);
+      
+      const allContratosRes = await fetch(allContratosUrl, { method: 'GET', headers: authHeaders });
+      if (allContratosRes.ok) {
+        const allContratosJson: any = await allContratosRes.json();
+        const contratosRaw = allContratosJson?.customer_contracts || allContratosJson?.contracts || allContratosJson?.data || [];
+        
+        if (Array.isArray(contratosRaw)) {
+          for (const c of contratosRaw) {
+            allContratos.push({
+              id: c.id,
+              plano_nome: c.plan?.name || c.name || c.description || null,
+              valor: toNumberOrNull(c.plan?.value ?? c.value ?? c.monthly_value),
+              vencimento: toNumberOrNull(c.due_day ?? c.repeat_on),
+              status: c.access_status || c.status || null,
+              data_inicio: c.start_date || c.created_at || null,
+              data_fim: c.end_date || null,
+            });
+          }
+        }
+      }
+    }
+    
+    if (allContratos.length === 0 && Array.isArray(cliente.customer_contract_ids)) {
+      for (const cid of cliente.customer_contract_ids) {
+        const cUrl = `https://api.mikweb.com.br/v1/admin/customer_contracts/${cid}`;
+        const cRes = await fetch(cUrl, { method: 'GET', headers: authHeaders });
+        if (cRes.ok) {
+          const cJson: any = await cRes.json();
+          const c = cJson?.customer_contract || cJson;
+          allContratos.push({
+            id: c.id,
+            plano_nome: c.plan?.name || c.name || c.description || null,
+            valor: toNumberOrNull(c.plan?.value ?? c.value ?? c.monthly_value),
+            vencimento: toNumberOrNull(c.due_day ?? c.repeat_on),
+            status: c.access_status || c.status || null,
+            data_inicio: c.start_date || c.created_at || null,
+            data_fim: c.end_date || null,
+          });
+        }
+      }
+    }
+    
+    console.log('Total contracts found:', allContratos.length);
+
     console.log('Final plano_nome:', planoNome);
     console.log('Final valor_plano:', valorPlano);
     console.log('Final vencimento:', vencimento);
@@ -543,6 +593,7 @@ serve(async (req) => {
           access_status: contractAccessStatus || cliente.access_status || cliente.financial_status || null,
           servidor: cliente.server?.name,
           contrato_id: contratoId || null,
+          contratos: allContratos,
         },
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

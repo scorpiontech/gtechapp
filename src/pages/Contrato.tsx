@@ -1,10 +1,11 @@
-import React from 'react';
-import { Wifi, MapPin, User, Phone, Mail, Calendar, CreditCard } from 'lucide-react';
+import React, { useState } from 'react';
+import { Wifi, MapPin, User, Phone, Mail, Calendar, CreditCard, FileText } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { AppLayout } from '@/components/AppLayout';
 import { StatusBadge } from '@/components/StatusBadge';
 import { useAuth } from '@/contexts/AuthContext';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 
 const Contrato: React.FC = () => {
   const { cliente } = useAuth();
@@ -13,54 +14,121 @@ const Contrato: React.FC = () => {
     return null;
   }
 
+  const contratos = cliente.contratos || [];
+  const hasMultipleContracts = contratos.length > 1;
+
   const formatCPF = (cpf: string) => {
     const digits = cpf.replace(/\D/g, '');
     return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6, 9)}-${digits.slice(9)}`;
   };
 
-  const infoSections = [
-    {
-      title: 'Dados Pessoais',
-      items: [
-        { icon: User, label: 'Nome', value: cliente.nome },
-        { icon: User, label: 'CPF/CNPJ', value: formatCPF(cliente.cpf_cnpj) },
-        { icon: Phone, label: 'Celular', value: cliente.celular || '-' },
-        { icon: Phone, label: 'Telefone', value: cliente.telefone || '-' },
-        { icon: Mail, label: 'E-mail', value: cliente.email || '-' },
-      ],
-    },
-    {
-      title: 'Endereço',
-      items: [
-        { 
-          icon: MapPin, 
-          label: 'Endereço', 
-          value: `${cliente.endereco}, ${cliente.numero}` 
-        },
-        { icon: MapPin, label: 'Bairro', value: cliente.bairro },
-        { icon: MapPin, label: 'Cidade/UF', value: `${cliente.cidade} - ${cliente.estado}` },
-        { icon: MapPin, label: 'CEP', value: cliente.cep || '-' },
-      ],
-    },
-    {
-      title: 'Plano e Pagamento',
-      items: [
-        { icon: Wifi, label: 'Plano', value: cliente.plano_nome || cliente.plano || 'Não informado' },
-        { 
-          icon: CreditCard, 
-          label: 'Valor', 
-          value: cliente.valor_plano 
-            ? new Intl.NumberFormat('pt-BR', { 
-                style: 'currency', 
-                currency: 'BRL' 
-              }).format(cliente.valor_plano)
-            : 'Não informado'
-        },
-        { icon: Calendar, label: 'Vencimento', value: cliente.vencimento ? `Dia ${cliente.vencimento}` : 'Não informado' },
-        { icon: Calendar, label: 'Cliente desde', value: cliente.data_cadastro ? new Date(cliente.data_cadastro).toLocaleDateString('pt-BR') : 'Não informado' },
-      ],
-    },
-  ];
+  const formatCurrency = (value: number | null) => {
+    if (!value) return 'Não informado';
+    return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
+  };
+
+  const personalSection = {
+    title: 'Dados Pessoais',
+    items: [
+      { icon: User, label: 'Nome', value: cliente.nome },
+      { icon: User, label: 'CPF/CNPJ', value: formatCPF(cliente.cpf_cnpj) },
+      { icon: Phone, label: 'Celular', value: cliente.celular || '-' },
+      { icon: Phone, label: 'Telefone', value: cliente.telefone || '-' },
+      { icon: Mail, label: 'E-mail', value: cliente.email || '-' },
+    ],
+  };
+
+  const addressSection = {
+    title: 'Endereço',
+    items: [
+      { icon: MapPin, label: 'Endereço', value: `${cliente.endereco}, ${cliente.numero}` },
+      { icon: MapPin, label: 'Bairro', value: cliente.bairro },
+      { icon: MapPin, label: 'Cidade/UF', value: `${cliente.cidade} - ${cliente.estado}` },
+      { icon: MapPin, label: 'CEP', value: cliente.cep || '-' },
+    ],
+  };
+
+  const renderInfoSection = (section: typeof personalSection) => (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base">{section.title}</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {section.items.map((item, idx) => (
+          <React.Fragment key={idx}>
+            {idx > 0 && <Separator />}
+            <div className="flex items-start gap-3">
+              <item.icon className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-xs text-muted-foreground">{item.label}</p>
+                <p className="text-sm font-medium break-words">{item.value}</p>
+              </div>
+            </div>
+          </React.Fragment>
+        ))}
+      </CardContent>
+    </Card>
+  );
+
+  const renderContractCard = (contrato: typeof contratos[0], index: number) => (
+    <Card key={contrato.id}>
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-base flex items-center gap-2">
+            <FileText className="h-4 w-4" />
+            {contrato.plano_nome || `Contrato #${contrato.id}`}
+          </CardTitle>
+          {contrato.status && (
+            <StatusBadge status={
+              contrato.status === 'A' || contrato.status === 'Ativo' ? 'ativo' :
+              contrato.status === 'B' || contrato.status === 'Bloqueado' ? 'bloqueado' :
+              contrato.status
+            } />
+          )}
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="flex items-start gap-3">
+          <CreditCard className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+          <div>
+            <p className="text-xs text-muted-foreground">Valor</p>
+            <p className="text-sm font-medium">{formatCurrency(contrato.valor)}</p>
+          </div>
+        </div>
+        <Separator />
+        <div className="flex items-start gap-3">
+          <Calendar className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+          <div>
+            <p className="text-xs text-muted-foreground">Vencimento</p>
+            <p className="text-sm font-medium">{contrato.vencimento ? `Dia ${contrato.vencimento}` : 'Não informado'}</p>
+          </div>
+        </div>
+        {contrato.data_inicio && (
+          <>
+            <Separator />
+            <div className="flex items-start gap-3">
+              <Calendar className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+              <div>
+                <p className="text-xs text-muted-foreground">Início</p>
+                <p className="text-sm font-medium">{new Date(contrato.data_inicio).toLocaleDateString('pt-BR')}</p>
+              </div>
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+
+  // Fallback: se não há contratos da API, mostrar dados do cliente como antes
+  const fallbackPlanSection = {
+    title: 'Plano e Pagamento',
+    items: [
+      { icon: Wifi, label: 'Plano', value: cliente.plano_nome || cliente.plano || 'Não informado' },
+      { icon: CreditCard, label: 'Valor', value: formatCurrency(cliente.valor_plano) },
+      { icon: Calendar, label: 'Vencimento', value: cliente.vencimento ? `Dia ${cliente.vencimento}` : 'Não informado' },
+      { icon: Calendar, label: 'Cliente desde', value: cliente.data_cadastro ? new Date(cliente.data_cadastro).toLocaleDateString('pt-BR') : 'Não informado' },
+    ],
+  };
 
   return (
     <AppLayout title="Meu Contrato" showBack>
@@ -78,29 +146,25 @@ const Contrato: React.FC = () => {
           </CardContent>
         </Card>
 
-        {/* Info Sections */}
-        {infoSections.map((section, idx) => (
-          <Card key={idx}>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">{section.title}</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {section.items.map((item, itemIdx) => (
-                <React.Fragment key={itemIdx}>
-                  {itemIdx > 0 && <Separator />}
-                  <div className="flex items-start gap-3">
-                    <item.icon className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs text-muted-foreground">{item.label}</p>
-                      <p className="text-sm font-medium break-words">{item.value}</p>
-                    </div>
-                  </div>
-                </React.Fragment>
-              ))}
-            </CardContent>
-          </Card>
-        ))}
+        {/* Dados Pessoais */}
+        {renderInfoSection(personalSection)}
 
+        {/* Endereço */}
+        {renderInfoSection(addressSection)}
+
+        {/* Contratos */}
+        {contratos.length > 0 ? (
+          <div className="space-y-2">
+            <h3 className="font-semibold text-sm text-foreground px-1">
+              {hasMultipleContracts ? `Contratos (${contratos.length})` : 'Contrato'}
+            </h3>
+            {contratos.map((c, i) => renderContractCard(c, i))}
+          </div>
+        ) : (
+          renderInfoSection(fallbackPlanSection)
+        )}
+
+        {/* Dados de Conexão */}
         {cliente.login && (
           <Card>
             <CardHeader className="pb-2">
