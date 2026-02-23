@@ -529,7 +529,7 @@ serve(async (req) => {
             allContratos.push({
               id: c.id,
               plano_nome: c.plan?.name || c.name || c.description || null,
-              valor: toNumberOrNull(c.plan?.value ?? c.value ?? c.monthly_value),
+              valor: toNumberOrNull(c.plan?.value ?? c.total ?? c.subtotal ?? c.value ?? c.monthly_value),
               vencimento: toNumberOrNull(c.due_day ?? c.repeat_on),
               status: c.access_status || c.status || null,
               data_inicio: c.start_date || c.created_at || null,
@@ -550,7 +550,7 @@ serve(async (req) => {
           allContratos.push({
             id: c.id,
             plano_nome: c.plan?.name || c.name || c.description || null,
-            valor: toNumberOrNull(c.plan?.value ?? c.value ?? c.monthly_value),
+            valor: toNumberOrNull(c.plan?.value ?? c.total ?? c.subtotal ?? c.value ?? c.monthly_value),
             vencimento: toNumberOrNull(c.due_day ?? c.repeat_on),
             status: c.access_status || c.status || null,
             data_inicio: c.start_date || c.created_at || null,
