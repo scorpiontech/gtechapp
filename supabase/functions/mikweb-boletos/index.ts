@@ -81,6 +81,7 @@ serve(async (req) => {
         id: b.id, situation_id: b.situation_id, situation_name: b.situation_name,
         situation: b.situation, due_day: b.due_day,
         value: b.value, value_paid: b.value_paid, date_payment: b.date_payment,
+        customer_contract_id: b.customer_contract_id, contract_id: b.contract_id,
       }));
     }
 
@@ -121,6 +122,7 @@ serve(async (req) => {
       return {
         id: billing.id,
         cliente_id: billing.customer_id,
+        contrato_id: billing.customer_contract_id || billing.contract_id || null,
         valor: parseFloat(billing.value) || 0,
         valor_pago: billing.value_paid ? parseFloat(billing.value_paid) : null,
         vencimento: billing.due_day || null, // "2025-12-25" format

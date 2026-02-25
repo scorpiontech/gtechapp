@@ -55,6 +55,7 @@ export interface MikWebContrato {
 export interface MikWebBoleto {
   id: number;
   cliente_id: number;
+  contrato_id?: number | null;
   valor: number;
   valor_pago?: number | null;
   vencimento: string;

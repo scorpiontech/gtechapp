@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Loader2, AlertCircle, Receipt, Filter } from 'lucide-react';
+import { Loader2, AlertCircle, Receipt, Filter, FileText } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { AppLayout } from '@/components/AppLayout';
@@ -17,11 +17,34 @@ const Boletos: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>('todos');
+  const [contratoFilter, setContratoFilter] = useState<string>('todos');
+
+  // Build contract options from client data and boleto data
+  const contratoOptions = useMemo(() => {
+    const contratos = cliente?.contratos || [];
+    // If client has contracts, use them
+    if (contratos.length > 0) {
+      return contratos.map((c) => ({
+        id: c.id,
+        label: c.plano_nome || `Contrato #${c.id}`,
+      }));
+    }
+    // Fallback: extract unique contract IDs from boletos
+    const ids = [...new Set(boletos.map((b) => b.contrato_id).filter(Boolean))] as number[];
+    return ids.map((id) => ({ id, label: `Contrato #${id}` }));
+  }, [cliente?.contratos, boletos]);
 
   const filteredBoletos = useMemo(() => {
-    if (statusFilter === 'todos') return boletos;
-    return boletos.filter((b) => b.status === statusFilter);
-  }, [boletos, statusFilter]);
+    let result = boletos;
+    if (contratoFilter !== 'todos') {
+      const cid = Number(contratoFilter);
+      result = result.filter((b) => b.contrato_id === cid);
+    }
+    if (statusFilter !== 'todos') {
+      result = result.filter((b) => b.status === statusFilter);
+    }
+    return result;
+  }, [boletos, statusFilter, contratoFilter]);
 
   useEffect(() => {
     const fetchBoletos = async () => {
@@ -61,25 +84,47 @@ const Boletos: React.FC = () => {
       <div className="p-4 space-y-4">
         {/* Filtro */}
         {!loading && !error && boletos.length > 0 && (
-          <div className="flex items-center gap-2">
-            <Filter className="h-4 w-4 text-muted-foreground" />
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-[160px]">
-                <SelectValue placeholder="Filtrar status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="todos">Todos</SelectItem>
-                <SelectItem value="aberto">Aberto</SelectItem>
-                <SelectItem value="vencido">Vencido</SelectItem>
-                <SelectItem value="pago">Pago</SelectItem>
-                <SelectItem value="cancelado">Cancelado</SelectItem>
-              </SelectContent>
-            </Select>
-            {statusFilter !== 'todos' && (
-              <span className="text-xs text-muted-foreground">
-                {filteredBoletos.length} de {boletos.length}
-              </span>
+          <div className="flex flex-col gap-3">
+            {/* Filtro por contrato */}
+            {contratoOptions.length > 1 && (
+              <div className="flex items-center gap-2">
+                <FileText className="h-4 w-4 text-muted-foreground" />
+                <Select value={contratoFilter} onValueChange={setContratoFilter}>
+                  <SelectTrigger className="flex-1">
+                    <SelectValue placeholder="Filtrar contrato" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="todos">Todos os contratos</SelectItem>
+                    {contratoOptions.map((c) => (
+                      <SelectItem key={c.id} value={String(c.id)}>
+                        {c.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             )}
+            {/* Filtro por status */}
+            <div className="flex items-center gap-2">
+              <Filter className="h-4 w-4 text-muted-foreground" />
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger className="w-[160px]">
+                  <SelectValue placeholder="Filtrar status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="todos">Todos</SelectItem>
+                  <SelectItem value="aberto">Aberto</SelectItem>
+                  <SelectItem value="vencido">Vencido</SelectItem>
+                  <SelectItem value="pago">Pago</SelectItem>
+                  <SelectItem value="cancelado">Cancelado</SelectItem>
+                </SelectContent>
+              </Select>
+              {(statusFilter !== 'todos' || contratoFilter !== 'todos') && (
+                <span className="text-xs text-muted-foreground">
+                  {filteredBoletos.length} de {boletos.length}
+                </span>
+              )}
+            </div>
           </div>
         )}
 
