@@ -36,6 +36,8 @@ export interface MikWebContratoResumo {
   status: string | null;
   data_inicio: string | null;
   data_fim: string | null;
+  velocidade_download: string | null;
+  velocidade_upload: string | null;
 }
 
 export interface MikWebContrato {
