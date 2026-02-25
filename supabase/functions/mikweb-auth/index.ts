@@ -526,6 +526,8 @@ serve(async (req) => {
         
         if (Array.isArray(contratosRaw)) {
           for (const c of contratosRaw) {
+            console.log('Contract raw fields:', Object.keys(c).join(', '));
+            console.log('Contract plan object:', c.plan ? JSON.stringify(c.plan) : 'null');
             allContratos.push({
               id: c.id,
               plano_nome: c.plan?.name || c.name || c.description || null,
@@ -534,6 +536,8 @@ serve(async (req) => {
               status: c.access_status || c.status || null,
               data_inicio: c.start_date || c.created_at || null,
               data_fim: c.end_date || null,
+              velocidade_download: c.plan?.download_speed || c.download_speed || c.plan?.download || null,
+              velocidade_upload: c.plan?.upload_speed || c.upload_speed || c.plan?.upload || null,
             });
           }
         }
@@ -555,6 +559,8 @@ serve(async (req) => {
             status: c.access_status || c.status || null,
             data_inicio: c.start_date || c.created_at || null,
             data_fim: c.end_date || null,
+            velocidade_download: c.plan?.download_speed || c.download_speed || c.plan?.download || null,
+            velocidade_upload: c.plan?.upload_speed || c.upload_speed || c.plan?.upload || null,
           });
         }
       }
