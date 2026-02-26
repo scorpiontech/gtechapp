@@ -32,6 +32,33 @@ export type Database = {
         }
         Relationships: []
       }
+      device_tokens: {
+        Row: {
+          cliente_id: number
+          created_at: string
+          id: string
+          platform: string
+          token: string
+          updated_at: string
+        }
+        Insert: {
+          cliente_id: number
+          created_at?: string
+          id?: string
+          platform: string
+          token: string
+          updated_at?: string
+        }
+        Update: {
+          cliente_id?: number
+          created_at?: string
+          id?: string
+          platform?: string
+          token?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

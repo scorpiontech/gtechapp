@@ -5,10 +5,17 @@ import { Card, CardContent } from '@/components/ui/card';
 import { AppLayout } from '@/components/AppLayout';
 import { StatusBadge } from '@/components/StatusBadge';
 import { useAuth } from '@/contexts/AuthContext';
+import { useOverdueNotification } from '@/hooks/useOverdueNotification';
+import { usePushRegistration } from '@/hooks/usePushRegistration';
 
 const Dashboard: React.FC = () => {
   const { cliente } = useAuth();
   const navigate = useNavigate();
+
+  // Check for overdue bills and show local notification
+  useOverdueNotification(cliente);
+  // Register device for push notifications
+  usePushRegistration(cliente);
 
   if (!cliente) {
     return null;
