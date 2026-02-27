@@ -47,25 +47,28 @@ async function registerWebPush(clienteId: number) {
 
 async function registerNativePush(clienteId: number) {
   try {
-    // Dynamic import for Capacitor Push Notifications
-    // @ts-ignore - dynamic import, package installed only in native builds
-    const { PushNotifications } = await import(/* @vite-ignore */ '@capacitor/push-notifications');
+    // Use globalThis to access Capacitor plugins registered at runtime
+    // This avoids build-time import resolution issues
+    const capacitorPlugins = (window as any).Capacitor?.Plugins;
+    const PushNotifications = capacitorPlugins?.PushNotifications;
+
+    if (!PushNotifications) return;
 
     const permResult = await PushNotifications.requestPermissions();
     if (permResult.receive !== 'granted') return;
 
     await PushNotifications.register();
 
-    PushNotifications.addListener('registration', async (pushToken) => {
+    PushNotifications.addListener('registration', async (pushToken: any) => {
       const platform = (window as any).Capacitor?.getPlatform?.() === 'ios' ? 'ios' : 'android';
       await saveToken(clienteId, pushToken.value, platform);
     });
 
-    PushNotifications.addListener('registrationError', (error) => {
+    PushNotifications.addListener('registrationError', (error: any) => {
       console.error('Push registration error:', error);
     });
   } catch {
-    // @capacitor/push-notifications not installed or not on native
+    // Push notifications not available
   }
 }
 
