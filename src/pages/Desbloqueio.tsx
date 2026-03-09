@@ -25,6 +25,7 @@ const Desbloqueio: React.FC = () => {
   const { toast } = useToast();
   const [status, setStatus] = useState<DesbloqueioStatus>('idle');
   const [message, setMessage] = useState('');
+  const [contratoInfo, setContratoInfo] = useState<{ id?: number; plano?: string } | null>(null);
 
   if (!cliente) return null;
 
