@@ -64,7 +64,7 @@ serve(async (req) => {
       'Content-Type': 'application/json',
     };
 
-    // 1. Buscar contrato do cliente para obter o contract_id
+    // 1. Buscar contratos do cliente e identificar o bloqueado
     console.log(`Buscando contratos do cliente ${cliente_id}...`);
     const contractsResp = await fetch(
       `https://api.mikweb.com.br/v1/admin/customer_contracts?customer_id=${cliente_id}`,
@@ -76,10 +76,43 @@ serve(async (req) => {
     if (contractsResp.ok) {
       const contractsData = await contractsResp.json();
       const contracts = contractsData.customer_contracts || contractsData.contracts || contractsData.data || [];
-      const activeContract = contracts?.find((c: any) => c.status === 'active') || contracts?.[0];
-      if (activeContract) {
-        contractId = activeContract.id;
-        console.log(`Contrato encontrado: id=${contractId}, access_status=${activeContract.access_status}`);
+      
+      console.log(`Total de contratos encontrados: ${contracts?.length || 0}`);
+      
+      // Listar todos os contratos para debug
+      contracts?.forEach((c: any) => {
+        console.log(`  Contrato id=${c.id}, status=${c.status}, access_status=${c.access_status}`);
+      });
+
+      // Filtrar apenas contratos bloqueados (ignorar cancelados e ativos com financeiro em dia)
+      const blockedStatuses = ['b', 'access_blocked', 'access_pending', 'ca', 'cm'];
+      const blockedContract = contracts?.find((c: any) => {
+        const accessStatus = (c.access_status || '').toLowerCase();
+        const isCancelled = (c.status || '').toLowerCase() === 'cancelled' || (c.status || '').toLowerCase() === 'canceled';
+        
+        // Ignorar contratos cancelados
+        if (isCancelled) {
+          console.log(`  Contrato id=${c.id} ignorado: cancelado`);
+          return false;
+        }
+        
+        // Selecionar apenas contratos com acesso bloqueado
+        const isBlocked = blockedStatuses.includes(accessStatus);
+        if (!isBlocked) {
+          console.log(`  Contrato id=${c.id} ignorado: acesso liberado (${accessStatus || c.status})`);
+        }
+        return isBlocked;
+      });
+
+      if (blockedContract) {
+        contractId = blockedContract.id;
+        console.log(`Contrato BLOQUEADO selecionado: id=${contractId}, access_status=${blockedContract.access_status}`);
+      } else {
+        // Nenhum contrato bloqueado encontrado
+        const hasActiveContracts = contracts?.some((c: any) => (c.status || '').toLowerCase() === 'active');
+        if (hasActiveContracts) {
+          console.log('Nenhum contrato bloqueado encontrado. Todos os contratos ativos estão com acesso liberado.');
+        }
       }
     }
 
