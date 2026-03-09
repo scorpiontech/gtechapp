@@ -25,6 +25,7 @@ const Desbloqueio: React.FC = () => {
   const { toast } = useToast();
   const [status, setStatus] = useState<DesbloqueioStatus>('idle');
   const [message, setMessage] = useState('');
+  const [contratoInfo, setContratoInfo] = useState<{ id?: number; plano?: string } | null>(null);
 
   if (!cliente) return null;
 
@@ -58,6 +59,7 @@ const Desbloqueio: React.FC = () => {
       if (data.success) {
         setStatus('success');
         setMessage(data.message || 'Desbloqueio realizado com sucesso!');
+        setContratoInfo({ id: data.contrato_id, plano: data.contrato_plano });
         toast({
           title: 'Sucesso!',
           description: 'Sua conexão foi desbloqueada.',
@@ -85,6 +87,7 @@ const Desbloqueio: React.FC = () => {
   const resetStatus = () => {
     setStatus('idle');
     setMessage('');
+    setContratoInfo(null);
   };
 
   return (
@@ -159,6 +162,11 @@ const Desbloqueio: React.FC = () => {
                 <div>
                   <p className="font-semibold text-success">Desbloqueio realizado!</p>
                   <p className="text-sm text-muted-foreground mt-1">{message}</p>
+                  {contratoInfo?.id && (
+                    <p className="text-xs text-muted-foreground mt-2">
+                      Contrato #{contratoInfo.id}{contratoInfo.plano ? ` — ${contratoInfo.plano}` : ''}
+                    </p>
+                  )}
                 </div>
                 <Button variant="outline" onClick={resetStatus}>
                   Voltar

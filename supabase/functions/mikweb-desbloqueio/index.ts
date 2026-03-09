@@ -117,8 +117,15 @@ serve(async (req) => {
     }
 
     let success = false;
+    let unlockedContractId: number | null = contractId;
+    let unlockedContractPlan: string | null = null;
 
     if (contractId) {
+      // Guardar info do contrato desbloqueado
+      const targetContract = contracts?.find((c: any) => c.id === contractId);
+      if (targetContract) {
+        unlockedContractPlan = targetContract.plan_name || targetContract.plan || null;
+      }
       // Tentar múltiplos endpoints para liberar acesso via contrato
       const endpoints = [
         { url: `https://api.mikweb.com.br/v1/admin/customer_contracts/${contractId}/access_status`, body: { access_status: 'access_activated' }, label: `customer_contracts/${contractId}/access_status` },
@@ -268,6 +275,8 @@ serve(async (req) => {
       JSON.stringify({
         success: true,
         message: 'Desbloqueio realizado com sucesso! Aguarde alguns instantes para que a conexão seja restabelecida.',
+        contrato_id: unlockedContractId || null,
+        contrato_plano: unlockedContractPlan || null,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
