@@ -161,6 +161,11 @@ const Desbloqueio: React.FC = () => {
                 <div>
                   <p className="font-semibold text-success">Desbloqueio realizado!</p>
                   <p className="text-sm text-muted-foreground mt-1">{message}</p>
+                  {contratoInfo?.id && (
+                    <p className="text-xs text-muted-foreground mt-2">
+                      Contrato #{contratoInfo.id}{contratoInfo.plano ? ` — ${contratoInfo.plano}` : ''}
+                    </p>
+                  )}
                 </div>
                 <Button variant="outline" onClick={resetStatus}>
                   Voltar
