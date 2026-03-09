@@ -72,10 +72,11 @@ serve(async (req) => {
     );
 
     let contractId: number | null = null;
+    let contracts: any[] = [];
 
     if (contractsResp.ok) {
       const contractsData = await contractsResp.json();
-      const contracts = contractsData.customer_contracts || contractsData.contracts || contractsData.data || [];
+      contracts = contractsData.customer_contracts || contractsData.contracts || contractsData.data || [];
       
       console.log(`Total de contratos encontrados: ${contracts?.length || 0}`);
       
