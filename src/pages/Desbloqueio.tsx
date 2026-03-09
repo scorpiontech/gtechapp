@@ -59,6 +59,7 @@ const Desbloqueio: React.FC = () => {
       if (data.success) {
         setStatus('success');
         setMessage(data.message || 'Desbloqueio realizado com sucesso!');
+        setContratoInfo({ id: data.contrato_id, plano: data.contrato_plano });
         toast({
           title: 'Sucesso!',
           description: 'Sua conexão foi desbloqueada.',
