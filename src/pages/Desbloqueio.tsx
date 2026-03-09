@@ -87,6 +87,7 @@ const Desbloqueio: React.FC = () => {
   const resetStatus = () => {
     setStatus('idle');
     setMessage('');
+    setContratoInfo(null);
   };
 
   return (

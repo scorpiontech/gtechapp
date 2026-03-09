@@ -275,6 +275,8 @@ serve(async (req) => {
       JSON.stringify({
         success: true,
         message: 'Desbloqueio realizado com sucesso! Aguarde alguns instantes para que a conexão seja restabelecida.',
+        contrato_id: unlockedContractId || null,
+        contrato_plano: unlockedContractPlan || null,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
