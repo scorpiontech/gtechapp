@@ -72,10 +72,11 @@ serve(async (req) => {
     );
 
     let contractId: number | null = null;
+    let contracts: any[] = [];
 
     if (contractsResp.ok) {
       const contractsData = await contractsResp.json();
-      const contracts = contractsData.customer_contracts || contractsData.contracts || contractsData.data || [];
+      contracts = contractsData.customer_contracts || contractsData.contracts || contractsData.data || [];
       
       console.log(`Total de contratos encontrados: ${contracts?.length || 0}`);
       
@@ -124,7 +125,7 @@ serve(async (req) => {
       // Guardar info do contrato desbloqueado
       const targetContract = contracts?.find((c: any) => c.id === contractId);
       if (targetContract) {
-        unlockedContractPlan = targetContract.plan_name || targetContract.plan || null;
+        unlockedContractPlan = targetContract.name || targetContract.plan_name || targetContract.plan || null;
       }
       // Tentar múltiplos endpoints para liberar acesso via contrato
       const endpoints = [
