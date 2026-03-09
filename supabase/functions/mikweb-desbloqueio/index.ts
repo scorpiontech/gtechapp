@@ -132,10 +132,9 @@ serve(async (req) => {
       }
     }
 
-    // 2. Colocar boletos vencidos em observação via endpoint correto
+    // 2. Verificar boletos e colocar em observação se necessário
     try {
-      console.log(`Buscando boletos vencidos do cliente ${cliente_id}...`);
-      // Buscar boletos em aberto (situation_id=2) e em atraso (situation_id=3)
+      console.log(`Buscando boletos do cliente ${cliente_id}...`);
       const billingsResp = await fetch(
         `https://api.mikweb.com.br/v1/admin/billings?customer_id=${cliente_id}`,
         { method: 'GET', headers: authHeaders }
@@ -144,51 +143,77 @@ serve(async (req) => {
       if (billingsResp.ok) {
         const billingsData = await billingsResp.json();
         const allBillings = billingsData.billings || billingsData.data || [];
-        // Filtrar boletos vencidos: situation_id 2 ou 3, com data de vencimento no passado
         const today = new Date();
         today.setHours(0, 0, 0, 0);
-        const billings = allBillings.filter((b: any) => {
+
+        // Filtrar boletos vencidos: situation_id 2 ou 3, com data de vencimento no passado
+        const overdueBillings = allBillings.filter((b: any) => {
           const due = new Date(b.due_day || b.vencimento);
           return due < today && [2, 3].includes(b.situation_id);
         });
-        console.log(`Boletos vencidos encontrados: ${billings.length} (de ${allBillings.length} total)`);
 
-        // Ordenar por vencimento decrescente e pegar apenas o mais recente
-        billings.sort((a: any, b: any) => {
-          const dateA = new Date(a.due_day || a.vencimento);
-          const dateB = new Date(b.due_day || b.vencimento);
-          return dateB.getTime() - dateA.getTime();
+        // Verificar se já existe boleto pago/confirmado pelo banco (situation_id 1 = pago)
+        const hasRecentPayment = allBillings.some((b: any) => {
+          const due = new Date(b.due_day || b.vencimento);
+          const isPaid = b.situation_id === 1 
+            || (b.situation_description || '').toLowerCase().includes('efetuado')
+            || (b.situation_description || '').toLowerCase().includes('pago')
+            || (b.situation_description || '').toLowerCase().includes('liquidado');
+          // Considerar pagamentos do mês atual como confirmação bancária
+          const isCurrentMonth = due.getMonth() === today.getMonth() && due.getFullYear() === today.getFullYear();
+          return isPaid && isCurrentMonth;
         });
-        const latestBilling = billings[0];
 
-        if (latestBilling) {
-          // lock_in = amanhã no formato dd-MM-yyyy
-          const tomorrow = new Date();
-          tomorrow.setDate(tomorrow.getDate() + 1);
-          const dd = String(tomorrow.getDate()).padStart(2, '0');
-          const mm = String(tomorrow.getMonth() + 1).padStart(2, '0');
-          const yyyy = tomorrow.getFullYear();
-          const lockIn = `${dd}-${mm}-${yyyy}`;
-          const billing = latestBilling;
-          try {
-            const obsResp = await fetch(
-              `https://api.mikweb.com.br/v1/admin/billings/${billing.id}/add_observation`,
-              {
-                method: 'PUT',
-                headers: authHeaders,
-                body: JSON.stringify({ lock_in: lockIn }),
-              }
-            );
-            const obsText = await obsResp.text();
-            console.log(`PUT /billings/${billing.id}/add_observation (lock_in=${lockIn}): ${obsResp.status} - ${obsText.substring(0, 300)}`);
-
-            if (obsResp.ok && !success) {
-              success = true;
-              console.log('Boleto mais recente colocado em observação - acesso deve ser liberado automaticamente');
-            }
-          } catch (billingErr) {
-            console.error(`Erro ao colocar boleto ${billing.id} em observação:`, billingErr);
+        if (hasRecentPayment) {
+          console.log('Pagamento já confirmado pelo banco. Não é necessário colocar em observação.');
+          if (!success) {
+            success = true; // O acesso já deveria estar liberado pelo sistema
           }
+        } else if (overdueBillings.length > 0) {
+          // Ordenar por vencimento decrescente e pegar o mais recente
+          overdueBillings.sort((a: any, b: any) => {
+            const dateA = new Date(a.due_day || a.vencimento);
+            const dateB = new Date(b.due_day || b.vencimento);
+            return dateB.getTime() - dateA.getTime();
+          });
+          const latestBilling = overdueBillings[0];
+
+          // Verificar se o status da cobrança já foi alterado para liberado/observação
+          const alreadyReleased = (latestBilling.situation_description || '').toLowerCase().includes('observa')
+            || latestBilling.situation_id === 4; // 4 = em observação em alguns sistemas
+
+          if (alreadyReleased) {
+            console.log(`Boleto ${latestBilling.id} já está em observação/liberado. Pulando add_observation.`);
+            if (!success) success = true;
+          } else {
+            // Colocar em observação com lock_in = amanhã
+            const tomorrow = new Date();
+            tomorrow.setDate(tomorrow.getDate() + 1);
+            const dd = String(tomorrow.getDate()).padStart(2, '0');
+            const mm = String(tomorrow.getMonth() + 1).padStart(2, '0');
+            const yyyy = tomorrow.getFullYear();
+            const lockIn = `${dd}-${mm}-${yyyy}`;
+
+            try {
+              const obsResp = await fetch(
+                `https://api.mikweb.com.br/v1/admin/billings/${latestBilling.id}/add_observation`,
+                {
+                  method: 'PUT',
+                  headers: authHeaders,
+                  body: JSON.stringify({ lock_in: lockIn }),
+                }
+              );
+              const obsText = await obsResp.text();
+              console.log(`PUT /billings/${latestBilling.id}/add_observation (lock_in=${lockIn}): ${obsResp.status} - ${obsText.substring(0, 300)}`);
+              if (obsResp.ok && !success) {
+                success = true;
+              }
+            } catch (billingErr) {
+              console.error(`Erro ao colocar boleto ${latestBilling.id} em observação:`, billingErr);
+            }
+          }
+        } else {
+          console.log('Nenhum boleto vencido encontrado.');
         }
       }
     } catch (billingError) {
