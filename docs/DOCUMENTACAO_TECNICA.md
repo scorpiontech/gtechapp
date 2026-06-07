@@ -1,7 +1,7 @@
 # 📄 Documentação Técnica — GTech Área do Cliente
 
-**Versão:** 1.0  
-**Data:** Fevereiro de 2026  
+**Versão:** 1.1  
+**Data:** Junho de 2026  
 **Projeto:** GTech App — Portal de Autoatendimento para Clientes de Provedor de Internet
 
 ---
@@ -21,6 +21,7 @@ O **GTech App** é uma aplicação web responsiva (mobile-first) que permite aos
 | **Autodesbloqueio** | Liberação temporária da conexão bloqueada por inadimplência (limite de 1x/mês) |
 | **Chamados Técnicos** | Abertura e acompanhamento de chamados de suporte técnico |
 | **Tema Claro/Escuro** | Alternância de tema visual com persistência |
+| **Push Notifications** | Notificações de boletos vencidos via FCM (Firebase Cloud Messaging) |
 
 ---
 
@@ -44,12 +45,13 @@ O **GTech App** é uma aplicação web responsiva (mobile-first) que permite aos
 | **React Hook Form** | 7.61.x | Gerenciamento de formulários |
 | **Sonner** | 1.7.x | Notificações toast |
 | **Recharts** | 2.15.x | Gráficos e visualização de dados |
+| **Capacitor** | 6.x | Wrapper para app Android/iOS (PWA nativo) |
 
 ### 2.2 Backend
 
 | Tecnologia | Finalidade |
 |---|---|
-| **Lovable Cloud (Supabase)** | Backend-as-a-Service — banco de dados PostgreSQL, Edge Functions, autenticação |
+| **Lovable Cloud** | Backend-as-a-Service — banco de dados PostgreSQL, Edge Functions, autenticação |
 | **Deno** | Runtime das Edge Functions (TypeScript server-side) |
 | **API MikWeb** | API REST externa do sistema de gestão do provedor |
 
@@ -61,6 +63,7 @@ O **GTech App** é uma aplicação web responsiva (mobile-first) que permite aos
 | **SQL** | Migrations e queries no banco de dados PostgreSQL |
 | **CSS** | Estilização via Tailwind CSS |
 | **HTML** | Estrutura semântica via JSX |
+| **Bash** | Script de deploy (`deploy.sh`) |
 
 ---
 
@@ -70,7 +73,7 @@ O **GTech App** é uma aplicação web responsiva (mobile-first) que permite aos
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│                   CLIENTE (Browser)                  │
+│                   CLIENTE (Browser/App)              │
 │  ┌───────────────────────────────────────────────┐   │
 │  │  React SPA (Vite + TypeScript + Tailwind)     │   │
 │  │  ├── Login (CPF/CNPJ)                         │   │
@@ -83,18 +86,20 @@ O **GTech App** é uma aplicação web responsiva (mobile-first) que permite aos
 └─────────────────────┼────────────────────────────────┘
                       │ HTTPS
 ┌─────────────────────┼────────────────────────────────┐
-│           LOVABLE CLOUD (Supabase)                    │
+│           LOVABLE CLOUD                              │
 │  ┌──────────────────┴────────────────────────────┐   │
 │  │           Edge Functions (Deno)                │   │
 │  │  ├── mikweb-auth         (autenticação)       │   │
 │  │  ├── mikweb-boletos      (boletos)            │   │
 │  │  ├── mikweb-desbloqueio  (desbloqueio)        │   │
 │  │  ├── mikweb-chamados     (abrir chamado)      │   │
-│  │  └── mikweb-list-chamados(listar chamados)    │   │
+│  │  ├── mikweb-list-chamados(listar chamados)    │   │
+│  │  └── send-push-notif.    (enviar push FCM)    │   │
 │  └──────────────────┬────────────────────────────┘   │
 │  ┌──────────────────┴────────────────────────────┐   │
 │  │        PostgreSQL Database                     │   │
-│  │  └── desbloqueio_logs (controle de uso)       │   │
+│  │  ├── desbloqueio_logs (controle de uso)       │   │
+│  │  └── device_tokens    (tokens FCM)            │   │
 │  └───────────────────────────────────────────────┘   │
 └─────────────────────┼────────────────────────────────┘
                       │ HTTPS (Bearer Token)
@@ -106,6 +111,8 @@ O **GTech App** é uma aplicação web responsiva (mobile-first) que permite aos
 │  ├── PUT  /billings/:id/add_observation              │
 │  ├── GET  /customer_contracts (contratos)            │
 │  ├── PUT  /customer_contracts/:id/access_status      │
+│  ├── PUT  /customer_contracts/:id/msg_payment        │
+│  ├── PUT  /customers/:id/msg_payment                   │
 │  ├── POST /calledies          (abrir chamado)        │
 │  └── GET  /calledies          (listar chamados)      │
 └──────────────────────────────────────────────────────┘
@@ -116,11 +123,12 @@ O **GTech App** é uma aplicação web responsiva (mobile-first) que permite aos
 1. Usuário digita CPF/CNPJ na tela de login
 2. Frontend invoca Edge Function `mikweb-auth`
 3. Edge Function busca cliente na API MikWeb por `search`
-4. Valida CPF/CNPJ exato e retorna dados completos do cliente
-5. Dados são armazenados no `localStorage` (`gtech_cliente`)
+4. Valida CPF/CNPJ exato e retorna dados completos do cliente + **token HMAC**
+5. Dados são armazenados no `localStorage` (`gtech_cliente` + `gtech_auth_token`)
 6. Em visitas futuras, dados são carregados do `localStorage` e atualizados em background
+7. O token HMAC (24h de validade) é exigido para invocar `mikweb-desbloqueio`
 
-> **Nota:** Não há senha. A autenticação é feita exclusivamente pelo CPF/CNPJ.
+> **Nota:** Não há senha nem Supabase Auth. A autenticação é feita exclusivamente pelo CPF/CNPJ validado contra a API MikWeb.
 
 ---
 
@@ -148,7 +156,9 @@ O **GTech App** é uma aplicação web responsiva (mobile-first) que permite aos
 │   │   └── AuthContext.tsx        # Contexto de autenticação global
 │   ├── hooks/
 │   │   ├── use-mobile.tsx         # Hook para detectar viewport mobile
-│   │   └── use-toast.ts           # Hook de notificações
+│   │   ├── use-toast.ts           # Hook de notificações
+│   │   ├── useOverdueNotification.ts # Notificações locais de boleto vencido
+│   │   └── usePushRegistration.ts # Registro de token FCM
 │   ├── integrations/
 │   │   └── supabase/
 │   │       ├── client.ts          # Cliente Supabase (auto-gerado)
@@ -173,14 +183,17 @@ O **GTech App** é uma aplicação web responsiva (mobile-first) que permite aos
 │   ├── config.toml                # Configuração Supabase
 │   ├── migrations/                # Migrations SQL
 │   └── functions/                 # Edge Functions
-│       ├── mikweb-auth/           # Autenticação via MikWeb
+│       ├── mikweb-auth/           # Autenticação via MikWeb + emite token HMAC
 │       ├── mikweb-boletos/        # Consulta de boletos
-│       ├── mikweb-desbloqueio/    # Processo de desbloqueio
+│       ├── mikweb-desbloqueio/    # Processo de desbloqueio (exige auth_token)
 │       ├── mikweb-chamados/       # Abertura de chamados
-│       └── mikweb-list-chamados/  # Listagem de chamados
+│       ├── mikweb-list-chamados/  # Listagem de chamados
+│       └── send-push-notifications/ # Envio de push via FCM
 ├── tailwind.config.ts             # Configuração Tailwind CSS
 ├── vite.config.ts                 # Configuração Vite
 ├── tsconfig.json                  # Configuração TypeScript
+├── capacitor.config.ts            # Configuração Capacitor (Android/iOS)
+├── deploy.sh                      # Script de deploy self-hosted
 └── package.json                   # Dependências npm
 ```
 
@@ -191,8 +204,12 @@ O **GTech App** é uma aplicação web responsiva (mobile-first) que permite aos
 ### 5.1 `mikweb-auth`
 - **Método:** POST
 - **Entrada:** `{ cpf: string }`
-- **Saída:** `{ success: boolean, cliente: MikWebCliente }`
-- **Lógica:** Busca cliente por CPF na API MikWeb, enriquece com dados do contrato, plano e valores.
+- **Saída:** `{ success: boolean, cliente: MikWebCliente, auth_token?: string }`
+- **Lógica:** 
+  1. Busca cliente por CPF na API MikWeb
+  2. Enriquece com dados do contrato, plano e valores
+  3. Gera token HMAC-SHA256 assinado com `SUPABASE_SERVICE_ROLE_KEY` (payload: `{cid, exp}`)
+  4. Retorna token para ser usado no desbloqueio
 
 ### 5.2 `mikweb-boletos`
 - **Método:** POST
@@ -202,13 +219,21 @@ O **GTech App** é uma aplicação web responsiva (mobile-first) que permite aos
 
 ### 5.3 `mikweb-desbloqueio`
 - **Método:** POST
-- **Entrada:** `{ cliente_id: number }`
-- **Saída:** `{ success: boolean, message: string }`
+- **Entrada:** `{ cliente_id: number, auth_token: string }`
+- **Saída:** `{ success: boolean, message: string, contrato_id?: number, contrato_plano?: string }`
 - **Lógica:**
-  1. Verifica limite mensal (1x/mês) via tabela `desbloqueio_logs`
-  2. Busca contrato ativo e tenta liberar acesso via múltiplos endpoints
-  3. Coloca o boleto mais recente em observação (vencimento = amanhã)
-  4. Registra o uso no banco de dados
+  1. **Valida `auth_token`** HMAC (assinatura, expiração, correspondência de `cliente_id`)
+  2. Verifica limite mensal (1x/mês) via tabela `desbloqueio_logs`
+  3. Busca contratos do cliente e identifica o bloqueado (`access_status` = `b`, `access_blocked`, etc.)
+  4. Tenta liberar acesso via múltiplos endpoints:
+     - `PUT /customer_contracts/:id/access_status` → `access_activated`
+     - `PUT /customer_contracts/:id/msg_payment` → `msg_payment_mk: 'L'`
+     - `PUT /customers/:id/msg_payment` → `msg_payment_mk: 'L'`
+  5. Verifica boletos vencidos:
+     - Se há pagamento confirmado pelo banco no mês atual, não altera nada
+     - Caso contrário, coloca o boleto mais recente em observação (`add_observation` com `lock_in = amanhã`)
+  6. Registra o uso no banco de dados
+  7. Retorna o `contrato_id` e `contrato_plano` do contrato que foi processado
 
 ### 5.4 `mikweb-chamados`
 - **Método:** POST
@@ -221,6 +246,15 @@ O **GTech App** é uma aplicação web responsiva (mobile-first) que permite aos
 - **Entrada:** `{ customer_id: number }`
 - **Saída:** `{ success: boolean, chamados: Chamado[] }`
 - **Lógica:** Lista chamados do cliente com paginação, mapeia códigos de status e prioridade para labels legíveis.
+
+### 5.6 `send-push-notifications`
+- **Método:** POST (invocado por cron/scheduler)
+- **Entrada:** `{ }` (sem parâmetros — processa todos os tokens)
+- **Saída:** `{ success: boolean, sent: number, failed: number }`
+- **Lógica:** 
+  1. Busca tokens FCM na tabela `device_tokens`
+  2. Verifica clientes com boletos vencidos via API MikWeb
+  3. Envia notificação push para cada dispositivo com boleto vencido
 
 ---
 
@@ -236,9 +270,25 @@ O **GTech App** é uma aplicação web responsiva (mobile-first) que permite aos
 
 **Finalidade:** Controlar o limite de 1 desbloqueio por mês por cliente.
 
-### 6.2 RLS (Row Level Security)
+**Acesso:** Apenas `service_role` (Edge Functions). Nenhum acesso direto de `anon` ou `authenticated`.
 
-A tabela possui RLS habilitado. O acesso é controlado via Edge Functions usando a `SUPABASE_SERVICE_ROLE_KEY`.
+### 6.2 Tabela: `device_tokens`
+
+| Coluna | Tipo | Descrição |
+|---|---|---|
+| `id` | UUID (PK) | Identificador único |
+| `token` | TEXT | Token FCM do dispositivo |
+| `cliente_id` | INTEGER | ID do cliente no MikWeb |
+| `platform` | TEXT | Plataforma (`android`, `ios`, `web`) |
+| `created_at` | TIMESTAMP | Data de registro |
+
+**Finalidade:** Armazenar tokens FCM para envio de push notifications.
+
+**Acesso:** Apenas `service_role` (Edge Functions). Nenhum acesso direto de `anon` ou `authenticated`.
+
+### 6.3 RLS (Row Level Security)
+
+Ambas as tabelas possuem RLS habilitado. O acesso é controlado exclusivamente via Edge Functions usando a `SUPABASE_SERVICE_ROLE_KEY`. Não há políticas de leitura/escrita para `anon` ou `authenticated`, pois a aplicação não utiliza o sistema de autenticação do Supabase — a autenticação é CPF-based via MikWeb.
 
 ---
 
@@ -264,7 +314,8 @@ A tabela possui RLS habilitado. O acesso é controlado via Edge Functions usando
 | `VITE_SUPABASE_PUBLISHABLE_KEY` | Frontend | Chave anônima do Supabase |
 | `MIKWEB_API_TOKEN` | Edge Functions | Token de autenticação da API MikWeb |
 | `SUPABASE_URL` | Edge Functions | URL interna do Supabase |
-| `SUPABASE_SERVICE_ROLE_KEY` | Edge Functions | Chave de serviço (acesso total ao banco) |
+| `SUPABASE_SERVICE_ROLE_KEY` | Edge Functions | Chave de serviço (acesso total ao banco + assinatura HMAC) |
+| `FCM_SERVER_KEY` | Edge Functions | Chave do Firebase Cloud Messaging (push notifications) |
 
 ---
 
@@ -277,6 +328,7 @@ Representa os dados de um cliente do provedor:
 - Plano: `plano_nome`, `valor_plano`, `vencimento`
 - Status: `bloqueado`, `access_status`, `status`
 - Conexão: `login`, `conexao_id`, `conexao_login`
+- Contratos: `contratos?: MikWebContratoResumo[]`
 
 ### `MikWebBoleto`
 Representa um boleto:
@@ -284,6 +336,7 @@ Representa um boleto:
 - Datas: `vencimento`, `data_pagamento`, `data_emissao`
 - Pagamento: `linha_digitavel`, `codigo_barras`, `link_boleto`, `pix_qr_code`, `pix_copy_paste`
 - Status: `status` (aberto, vencido, pago, cancelado)
+- Situação: `situation_id` (1=pago, 2=aberto, 3=atraso, 4=observação)
 
 ### `AuthState`
 Estado global de autenticação:
@@ -297,14 +350,17 @@ Estado global de autenticação:
 
 ### 10.1 Design System
 - **Abordagem:** Mobile-first, design limpo e funcional
+- **Cores:** Laranja/Preto/Branco — tema claro e escuro
 - **Componentes:** shadcn/ui com customizações via Tailwind CSS
 - **Tokens:** Cores semânticas via CSS custom properties (`--primary`, `--background`, `--foreground`, etc.)
 - **Tema:** Suporte a modo claro e escuro com persistência via `next-themes`
+- **Safe Areas:** Respeita safe areas em dispositivos iOS/Android (notch, home indicator)
 
 ### 10.2 Responsividade
 - Layout otimizado para dispositivos móveis
 - Header fixo com logo, toggle de tema e logout
 - Navegação inferior (bottom navigation) em telas mobile
+- Áreas de toque mínimas de 44px
 
 ---
 
@@ -312,31 +368,56 @@ Estado global de autenticação:
 
 | Aspecto | Implementação |
 |---|---|
-| **API Token** | Armazenado como secret no servidor, nunca exposto ao frontend |
+| **API Token MikWeb** | Armazenado como secret no servidor, nunca exposto ao frontend |
 | **Comunicação** | Todas as chamadas via HTTPS |
 | **CORS** | Configurado nas Edge Functions |
 | **RLS** | Habilitado nas tabelas do banco de dados |
 | **Sessão** | Dados do cliente no `localStorage` (sem tokens sensíveis) |
-| **Limites** | Desbloqueio limitado a 1x/mês por cliente |
-| **Validação** | CPF/CNPJ validado no frontend (formato) e backend (existência) |
+| **Token de Desbloqueio** | HMAC-SHA256 assinado com `SUPABASE_SERVICE_ROLE_KEY`, expira em 24h, vinculado ao `cliente_id` |
+| **Proteção Anti-Abuso** | Desbloqueio limitado a 1x/mês por cliente + validação de token obrigatória |
+| **Validação** | CPF/CNPJ validado no frontend (formato) e backend (existência na MikWeb) |
+| **Acesso ao Banco** | `desbloqueio_logs` e `device_tokens` acessíveis apenas por `service_role` |
+
+> **Importante:** O sistema não utiliza Supabase Auth. A autenticação é baseada em CPF/CNPJ validado na API MikWeb. Para proteger o endpoint de desbloqueio contra chamadas não autorizadas (anon key + qualquer `cliente_id`), foi implementado um token HMAC de 24h emitido pelo `mikweb-auth` e validado pelo `mikweb-desbloqueio`.
 
 ---
 
 ## 12. Deploy e Publicação
 
-- **Plataforma:** Lovable Cloud
+### 12.1 Lovable Cloud (Preview)
 - **URL de Preview:** `https://id-preview--{id}.lovable.app`
-- **URL Publicada:** `https://gtechapp.lovable.app`
-- **Deploy:** Automático via plataforma Lovable (push para produção com um clique)
-- **Edge Functions:** Deploy automático ao salvar alterações
+- **Deploy:** Automático ao salvar alterações na plataforma
+- **Edge Functions:** Deploy automático ao salvar
+
+### 12.2 Self-Hosted (Produção)
+- **Servidor:** Ubuntu + Nginx
+- **Domínio:** `app.gtechsolucoesti.com.br`
+- **Build:** Vite (SPA) gerando arquivos estáticos em `dist/`
+- **Nginx:** Configurado para SPA fallback (`try_files $uri $uri/ /index.html`)
+- **Script:** `deploy.sh` — verifica branch, instala dependências, builda e copia para o servidor
 
 ---
 
-## 13. Contato e Suporte
+## 13. Notificações Push
+
+### 13.1 Funcionamento
+1. O app registra o token FCM do dispositivo na tabela `device_tokens`
+2. Um agendador (cron) invoca a Edge Function `send-push-notifications`
+3. A função verifica quais clientes têm boletos vencidos
+4. Envia notificação push para cada dispositivo com boleto vencido
+
+### 13.2 Mensagem
+- **Título:** "Boleto vencido — GTech"
+- **Corpo:** "Você tem boletos em atraso. Acesse o app para mais detalhes."
+- **Ação:** Abre o app na tela de boletos
+
+---
+
+## 14. Contato e Suporte
 
 - **WhatsApp Suporte:** [0800 590 0456](https://wa.me/08005900456)
 - **Acesso ao sistema:** Via CPF/CNPJ cadastrado no provedor
 
 ---
 
-*Documento gerado automaticamente — GTech Área do Cliente v1.0*
+*Documento gerado automaticamente — GTech Área do Cliente v1.1*
