@@ -217,11 +217,29 @@ serve(async (req) => {
 
     // 2. Verificar boletos e colocar em observação se necessário
     try {
-      console.log(`Buscando boletos do cliente ${cliente_id}...`);
-      const billingsResp = await fetch(
-        `https://api.mikweb.com.br/v1/admin/billings?customer_id=${cliente_id}`,
-        { method: 'GET', headers: authHeaders }
-      );
+      console.log(`Buscando boletos do cliente ${cliente_id} (com paginação)...`);
+
+      // Paginar TODAS as páginas para garantir que pegamos o boleto mais recente
+      const allBillings: any[] = [];
+      const maxPages = 20;
+      for (let page = 1; page <= maxPages; page++) {
+        const resp = await fetch(
+          `https://api.mikweb.com.br/v1/admin/billings?customer_id=${cliente_id}&page=${page}&per_page=100`,
+          { method: 'GET', headers: authHeaders }
+        );
+        if (!resp.ok) {
+          console.log(`Billings page ${page}: HTTP ${resp.status}, parando paginação`);
+          await resp.text();
+          break;
+        }
+        const data = await resp.json();
+        const pageBillings = data.billings || data.data || [];
+        console.log(`Billings page ${page}: ${pageBillings.length} registros`);
+        if (pageBillings.length === 0) break;
+        allBillings.push(...pageBillings);
+        if (pageBillings.length < 100) break;
+      }
+      console.log(`Total de boletos coletados: ${allBillings.length}`);
 
       // Parser robusto para datas vindas do MikWeb (aceita YYYY-MM-DD, DD/MM/YYYY, DD-MM-YYYY)
       const parseDueDate = (raw: any): Date | null => {
@@ -250,9 +268,7 @@ serve(async (req) => {
         return false;
       };
 
-      if (billingsResp.ok) {
-        const billingsData = await billingsResp.json();
-        const allBillings = billingsData.billings || billingsData.data || [];
+      {
         const today = new Date();
         const todayUTC = new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()));
 
@@ -283,6 +299,7 @@ serve(async (req) => {
             && due.getUTCFullYear() === todayUTC.getUTCFullYear();
           return isPaid && isCurrentMonth;
         });
+
 
         if (hasRecentPayment && overdueBillings.length === 0) {
           console.log('Pagamento já confirmado pelo banco. Não é necessário colocar em observação.');
