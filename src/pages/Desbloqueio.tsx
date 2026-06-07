@@ -56,33 +56,53 @@ const Desbloqueio: React.FC = () => {
       const renovarAuthToken = async (): Promise<string | null> => {
         if (!cliente?.cpf_cnpj) return null;
         const cpf = String(cliente.cpf_cnpj).replace(/\D/g, '');
-        const { data: authData } = await supabase.functions.invoke('mikweb-auth', { body: { cpf } });
-        if (authData?.success && isUsableAuthToken(authData.auth_token)) {
-          localStorage.setItem('gtech_auth_token', authData.auth_token);
-          if (authData.cliente) localStorage.setItem('gtech_cliente', JSON.stringify(authData.cliente));
-          return authData.auth_token;
+        try {
+          const { data: authData, error: authError } = await supabase.functions.invoke('mikweb-auth', { body: { cpf } });
+          if (authError) {
+            console.warn('mikweb-auth retornou erro:', authError);
+            return null;
+          }
+          if (authData?.success && isUsableAuthToken(authData.auth_token)) {
+            localStorage.setItem('gtech_auth_token', authData.auth_token);
+            if (authData.cliente) localStorage.setItem('gtech_cliente', JSON.stringify(authData.cliente));
+            return authData.auth_token;
+          }
+          console.warn('mikweb-auth não retornou auth_token válido:', authData);
+          return null;
+        } catch (e) {
+          console.warn('Falha ao chamar mikweb-auth:', e);
+          return null;
         }
-        return null;
       };
 
-      let authToken = localStorage.getItem('gtech_auth_token');
+      // SEMPRE renovar o token antes da chamada para garantir que está válido
+      // (não confiar em token antigo do localStorage que pode ter expirado)
+      let authToken = await renovarAuthToken();
 
-      // Se não há token válido (ex: sessão antiga ou valor "null"/"undefined" salvo), renovar via mikweb-auth
+      // Fallback: se renovação falhar, tentar o token cached
       if (!isUsableAuthToken(authToken)) {
-        try {
-          authToken = await renovarAuthToken();
-        } catch (e) {
-          console.warn('Falha ao renovar token:', e);
+        const cached = localStorage.getItem('gtech_auth_token');
+        if (isUsableAuthToken(cached)) {
+          console.warn('Usando token cached (renovação falhou)');
+          authToken = cached;
         }
+      }
+
+      if (!isUsableAuthToken(authToken)) {
+        setStatus('error');
+        setMessage('Não foi possível autenticar a sessão. Tente sair e entrar novamente.');
+        toast({ title: 'Erro de autenticação', description: 'Faça logout e entre novamente.', variant: 'destructive' });
+        return;
       }
 
       let { data, error } = await supabase.functions.invoke('mikweb-desbloqueio', {
         body: { cliente_id: cliente.id, contrato_id: (cliente as any).contrato_id || null, auth_token: authToken },
       });
 
-      if ((error || String(data?.error || '').toLowerCase().includes('sessão inválida')) && cliente?.cpf_cnpj) {
+      // Retry uma vez se erro/sessão inválida
+      if (error || String(data?.error || '').toLowerCase().includes('sessão inválida')) {
         const renewedToken = await renovarAuthToken();
-        if (renewedToken) {
+        if (isUsableAuthToken(renewedToken)) {
           const retry = await supabase.functions.invoke('mikweb-desbloqueio', {
             body: { cliente_id: cliente.id, contrato_id: (cliente as any).contrato_id || null, auth_token: renewedToken },
           });
@@ -90,6 +110,7 @@ const Desbloqueio: React.FC = () => {
           error = retry.error;
         }
       }
+
 
       // Edge function pode retornar erro com payload (ex: 401). Priorizar data.error.
       if (data && data.success === false) {
