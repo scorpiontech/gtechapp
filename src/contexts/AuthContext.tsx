@@ -49,11 +49,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             if (error || !data?.success || !data?.cliente) return;
 
             localStorage.setItem('gtech_cliente', JSON.stringify(data.cliente));
+            if (data.auth_token) localStorage.setItem('gtech_auth_token', data.auth_token);
             setState({
               isAuthenticated: true,
               cliente: data.cliente,
               loading: false,
             });
+
           } catch {
             // silencioso: mantém dados salvos
           }
