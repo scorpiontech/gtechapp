@@ -89,6 +89,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       const cliente = data.cliente;
       localStorage.setItem('gtech_cliente', JSON.stringify(cliente));
+      if (data.auth_token) localStorage.setItem('gtech_auth_token', data.auth_token);
       
       setState({
         isAuthenticated: true,
@@ -105,12 +106,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const logout = useCallback(() => {
     localStorage.removeItem('gtech_cliente');
+    localStorage.removeItem('gtech_auth_token');
     setState({
       isAuthenticated: false,
       cliente: null,
       loading: false,
     });
   }, []);
+
 
   return (
     <AuthContext.Provider value={{ ...state, login, logout }}>
