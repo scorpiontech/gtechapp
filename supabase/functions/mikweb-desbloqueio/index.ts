@@ -14,7 +14,7 @@ serve(async (req) => {
   }
 
   try {
-    const { cliente_id } = await req.json();
+    const { cliente_id, auth_token } = await req.json();
 
     if (!cliente_id) {
       return new Response(
@@ -22,6 +22,48 @@ serve(async (req) => {
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
       );
     }
+
+    // Validar auth_token HMAC (emitido pelo mikweb-auth)
+    const secret = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
+    const verifyToken = async (token: string | undefined): Promise<{ ok: boolean; reason?: string }> => {
+      if (!token || typeof token !== 'string' || !token.includes('.')) return { ok: false, reason: 'missing' };
+      try {
+        const [payloadB64, sigB64] = token.split('.');
+        const b64urlDecode = (s: string) => {
+          const pad = s.length % 4 === 0 ? '' : '='.repeat(4 - (s.length % 4));
+          const b64 = s.replace(/-/g, '+').replace(/_/g, '/') + pad;
+          const bin = atob(b64);
+          const bytes = new Uint8Array(bin.length);
+          for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+          return bytes;
+        };
+        const enc = new TextEncoder();
+        const payloadBytes = b64urlDecode(payloadB64);
+        const sigBytes = b64urlDecode(sigB64);
+        const key = await crypto.subtle.importKey(
+          'raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['verify']
+        );
+        const valid = await crypto.subtle.verify('HMAC', key, sigBytes, payloadBytes);
+        if (!valid) return { ok: false, reason: 'invalid_signature' };
+        const payload = JSON.parse(new TextDecoder().decode(payloadBytes));
+        if (!payload.exp || Date.now() > payload.exp) return { ok: false, reason: 'expired' };
+        if (Number(payload.cid) !== Number(cliente_id)) return { ok: false, reason: 'cliente_mismatch' };
+        return { ok: true };
+      } catch {
+        return { ok: false, reason: 'parse_error' };
+      }
+    };
+
+    const tokenCheck = await verifyToken(auth_token);
+    if (!tokenCheck.ok) {
+      console.warn(`Token inválido para cliente ${cliente_id}: ${tokenCheck.reason}`);
+      return new Response(
+        JSON.stringify({ success: false, error: 'Sessão inválida ou expirada. Faça login novamente.' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 401 }
+      );
+    }
+
+
 
     const apiToken = Deno.env.get('MIKWEB_API_TOKEN');
     const supabaseUrl = Deno.env.get('SUPABASE_URL');
