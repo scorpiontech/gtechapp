@@ -572,9 +572,30 @@ serve(async (req) => {
     console.log('Final valor_plano:', valorPlano);
     console.log('Final vencimento:', vencimento);
 
+    // Gerar token HMAC para autorizar ações sensíveis (ex: desbloqueio)
+    let authToken: string | null = null;
+    try {
+      const secret = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
+      const payload = { cid: cliente.id, exp: Date.now() + 24 * 60 * 60 * 1000 };
+      const payloadStr = JSON.stringify(payload);
+      const enc = new TextEncoder();
+      const key = await crypto.subtle.importKey(
+        'raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
+      );
+      const sig = await crypto.subtle.sign('HMAC', key, enc.encode(payloadStr));
+      const b64url = (data: Uint8Array | string) => {
+        const bytes = typeof data === 'string' ? enc.encode(data) : data;
+        return btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      };
+      authToken = `${b64url(payloadStr)}.${b64url(new Uint8Array(sig))}`;
+    } catch (e) {
+      console.error('Erro ao gerar auth_token:', e);
+    }
+
     return new Response(
       JSON.stringify({
         success: true,
+        auth_token: authToken,
         cliente: {
           id: cliente.id,
           nome: cliente.full_name,
@@ -604,6 +625,7 @@ serve(async (req) => {
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
+
 
   } catch (error) {
     console.error('Error:', error);
