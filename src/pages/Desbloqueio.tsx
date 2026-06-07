@@ -50,11 +50,34 @@ const Desbloqueio: React.FC = () => {
     setMessage('');
 
     try {
-      const authToken = localStorage.getItem('gtech_auth_token');
+      let authToken = localStorage.getItem('gtech_auth_token');
+
+      // Se não há token (ex: sessão criada antes da atualização), renovar via mikweb-auth
+      if (!authToken && cliente?.cpf_cnpj) {
+        try {
+          const cpf = String(cliente.cpf_cnpj).replace(/\D/g, '');
+          const { data: authData } = await supabase.functions.invoke('mikweb-auth', { body: { cpf } });
+          if (authData?.success && authData?.auth_token) {
+            authToken = authData.auth_token;
+            localStorage.setItem('gtech_auth_token', authData.auth_token);
+            if (authData.cliente) localStorage.setItem('gtech_cliente', JSON.stringify(authData.cliente));
+          }
+        } catch (e) {
+          console.warn('Falha ao renovar token:', e);
+        }
+      }
+
       const { data, error } = await supabase.functions.invoke('mikweb-desbloqueio', {
         body: { cliente_id: cliente.id, contrato_id: (cliente as any).contrato_id || null, auth_token: authToken },
       });
 
+      // Edge function pode retornar erro com payload (ex: 401). Priorizar data.error.
+      if (data && data.success === false) {
+        setStatus('error');
+        setMessage(data.error || 'Não foi possível realizar o desbloqueio.');
+        toast({ title: 'Erro', description: data.error || 'Falha ao desbloquear.', variant: 'destructive' });
+        return;
+      }
 
       if (error) throw error;
 
