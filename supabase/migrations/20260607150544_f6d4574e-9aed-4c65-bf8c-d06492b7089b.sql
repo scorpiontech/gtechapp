@@ -1,0 +1,1 @@
+DELETE FROM public.desbloqueio_logs WHERE cliente_id = 1810838 AND created_at > now() - interval '1 hour';
