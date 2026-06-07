@@ -59,7 +59,7 @@ serve(async (req) => {
       console.warn(`Token inválido para cliente ${cliente_id}: ${tokenCheck.reason}`);
       return new Response(
         JSON.stringify({ success: false, error: 'Sessão inválida ou expirada. Faça login novamente.' }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 401 }
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 

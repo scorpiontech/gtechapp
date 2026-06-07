@@ -50,26 +50,46 @@ const Desbloqueio: React.FC = () => {
     setMessage('');
 
     try {
+      const isUsableAuthToken = (token: string | null): token is string =>
+        !!token && token !== 'null' && token !== 'undefined' && token.includes('.');
+
+      const renovarAuthToken = async (): Promise<string | null> => {
+        if (!cliente?.cpf_cnpj) return null;
+        const cpf = String(cliente.cpf_cnpj).replace(/\D/g, '');
+        const { data: authData } = await supabase.functions.invoke('mikweb-auth', { body: { cpf } });
+        if (authData?.success && isUsableAuthToken(authData.auth_token)) {
+          localStorage.setItem('gtech_auth_token', authData.auth_token);
+          if (authData.cliente) localStorage.setItem('gtech_cliente', JSON.stringify(authData.cliente));
+          return authData.auth_token;
+        }
+        return null;
+      };
+
       let authToken = localStorage.getItem('gtech_auth_token');
 
-      // Se não há token (ex: sessão criada antes da atualização), renovar via mikweb-auth
-      if (!authToken && cliente?.cpf_cnpj) {
+      // Se não há token válido (ex: sessão antiga ou valor "null"/"undefined" salvo), renovar via mikweb-auth
+      if (!isUsableAuthToken(authToken)) {
         try {
-          const cpf = String(cliente.cpf_cnpj).replace(/\D/g, '');
-          const { data: authData } = await supabase.functions.invoke('mikweb-auth', { body: { cpf } });
-          if (authData?.success && authData?.auth_token) {
-            authToken = authData.auth_token;
-            localStorage.setItem('gtech_auth_token', authData.auth_token);
-            if (authData.cliente) localStorage.setItem('gtech_cliente', JSON.stringify(authData.cliente));
-          }
+          authToken = await renovarAuthToken();
         } catch (e) {
           console.warn('Falha ao renovar token:', e);
         }
       }
 
-      const { data, error } = await supabase.functions.invoke('mikweb-desbloqueio', {
+      let { data, error } = await supabase.functions.invoke('mikweb-desbloqueio', {
         body: { cliente_id: cliente.id, contrato_id: (cliente as any).contrato_id || null, auth_token: authToken },
       });
+
+      if ((error || String(data?.error || '').toLowerCase().includes('sessão inválida')) && cliente?.cpf_cnpj) {
+        const renewedToken = await renovarAuthToken();
+        if (renewedToken) {
+          const retry = await supabase.functions.invoke('mikweb-desbloqueio', {
+            body: { cliente_id: cliente.id, contrato_id: (cliente as any).contrato_id || null, auth_token: renewedToken },
+          });
+          data = retry.data;
+          error = retry.error;
+        }
+      }
 
       // Edge function pode retornar erro com payload (ex: 401). Priorizar data.error.
       if (data && data.success === false) {
