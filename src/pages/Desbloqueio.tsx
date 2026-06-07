@@ -80,7 +80,7 @@ const Desbloqueio: React.FC = () => {
         body: { cliente_id: cliente.id, contrato_id: (cliente as any).contrato_id || null, auth_token: authToken },
       });
 
-      if ((error || data?.error?.toLowerCase?.().includes('sessão inválida')) && cliente?.cpf_cnpj) {
+      if ((error || String(data?.error || '').toLowerCase().includes('sessão inválida')) && cliente?.cpf_cnpj) {
         const renewedToken = await renovarAuthToken();
         if (renewedToken) {
           const retry = await supabase.functions.invoke('mikweb-desbloqueio', {
