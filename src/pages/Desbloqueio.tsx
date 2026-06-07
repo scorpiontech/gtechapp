@@ -50,9 +50,11 @@ const Desbloqueio: React.FC = () => {
     setMessage('');
 
     try {
+      const authToken = localStorage.getItem('gtech_auth_token');
       const { data, error } = await supabase.functions.invoke('mikweb-desbloqueio', {
-        body: { cliente_id: cliente.id, contrato_id: (cliente as any).contrato_id || null },
+        body: { cliente_id: cliente.id, contrato_id: (cliente as any).contrato_id || null, auth_token: authToken },
       });
+
 
       if (error) throw error;
 
